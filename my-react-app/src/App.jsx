@@ -25,10 +25,10 @@ function App() {
   const [isLoadingAudio, setIsLoadingAudio] = useState(false);
   
   const getInitialBands = () => [
-    { startFreq: 0, endFreq: 5000, gain: 1 },
-    { startFreq: 5000, endFreq: 10000, gain: 1 },
-    { startFreq: 10000, endFreq: 15000, gain: 1 },
-    { startFreq: 15000, endFreq: 24000, gain: 1 }  // Extended to cover Nyquist frequency (22.05kHz)
+    { low: 0, high: 5000, gain: 1 },
+    { low: 5000, high: 10000, gain: 1 },
+    { low: 10000, high: 15000, gain: 1 },
+    { low: 15000, high: 24000, gain: 1 }  // Extended to cover Nyquist frequency (22.05kHz)
   ];
 
   const [customBands, setCustomBands] = useState(() => {
@@ -53,6 +53,9 @@ function App() {
   
   // Add processing flag to prevent concurrent equalizer updates
   const [isProcessingEqualizer, setIsProcessingEqualizer] = useState(false);
+  
+  // Debounce timer for band additions
+  const bandAddDebounceRef = React.useRef(null);
 
   // Synchronized playback state for both audio playbacks
   const [playbackState, setPlaybackState] = useState({
@@ -72,6 +75,15 @@ function App() {
       console.error('Error saving bands to localStorage:', e);
     }
   }, [customBands]);
+  
+  // Cleanup band addition debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (bandAddDebounceRef.current) {
+        clearTimeout(bandAddDebounceRef.current);
+      }
+    };
+  }, []);
 
   // Event handlers
   const handleModeChange = useCallback((mode, subMode) => {
@@ -85,9 +97,62 @@ function App() {
   }, []);
 
   const handleAddBand = useCallback((band) => {
-    setCustomBands(prevBands => [...prevBands, band]);
+    const newBands = [...customBands, band];
+    setCustomBands(newBands);
+    
+    // Clear existing timer
+    if (bandAddDebounceRef.current) {
+      clearTimeout(bandAddDebounceRef.current);
+      console.log('Band addition timer reset');
+    } else {
+      console.log('Band addition timer started');
+    }
+    
     console.log('Band added:', band);
-  }, []);
+    
+    // Start new timer to call API after 1 second
+    if (uploadedAudioFile) {
+      bandAddDebounceRef.current = setTimeout(() => {
+        console.log('1 second elapsed after band addition - calling API with updated bands');
+        
+        // Build bands array with current gains (all should be 1.0 for new band)
+        const bandsForApi = newBands.map(b => ({
+          low: b.low,
+          high: b.high,
+          gain: b.gain || 1.0
+        }));
+        
+        // Trigger equalizer update through the existing flow
+        // We'll call updateEqualizerGains directly
+        (async () => {
+          if (isProcessingEqualizer) {
+            console.log('Already processing equalizer update, skipping band addition update');
+            return;
+          }
+          
+          setIsProcessingEqualizer(true);
+          try {
+            console.log('Updating equalizer with new bands:', bandsForApi);
+            const result = await updateEqualizerGains(uploadedAudioFile, bandsForApi);
+            console.log('Equalizer update complete after band addition');
+            
+            setFftData(result);
+            
+            if (result.outputAudioUrl) {
+              const outputBuffer = await loadAudioFile(result.outputAudioUrl);
+              setOutputAudioBuffer(outputBuffer);
+            } else {
+              setOutputAudioBuffer(inputAudioBuffer);
+            }
+          } catch (error) {
+            console.error('Error updating equalizer after band addition:', error);
+          } finally {
+            setIsProcessingEqualizer(false);
+          }
+        })();
+      }, 1000);
+    }
+  }, [customBands, uploadedAudioFile, isProcessingEqualizer, inputAudioBuffer]);
 
   const handleRemoveBand = useCallback((index) => {
     setCustomBands(prevBands => prevBands.filter((_, i) => i !== index));
@@ -309,6 +374,7 @@ function App() {
                   playbackState={playbackState}
                   onPlaybackStateChange={setPlaybackState}
                   audioBuffer={outputAudioBuffer}
+                  inputAudioBuffer={inputAudioBuffer}
                   isProcessing={false}
                 />
               </div>
@@ -318,14 +384,12 @@ function App() {
                 <FourierTransform 
                   label="Fourier Transform - Linear Scale"
                   scaleType="linear"
-                  audioBuffer={inputAudioBuffer}
-                  outputAudioBuffer={outputAudioBuffer}
+                  backendFFTData={fftData}
                 />
                 <FourierTransform 
                   label="Fourier Transform - Audiogram"
                   scaleType="audiogram"
-                  audioBuffer={inputAudioBuffer}
-                  outputAudioBuffer={outputAudioBuffer}
+                  backendFFTData={fftData}
                 />
               </div>
             </div>

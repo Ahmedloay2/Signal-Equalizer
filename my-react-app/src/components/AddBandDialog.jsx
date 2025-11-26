@@ -9,9 +9,11 @@ export const AddBandDialog = ({ onAddBand, existingBands }) => {
 
   const checkOverlap = (start, end) => {
     for (const band of existingBands) {
-      if ((start >= band.startFreq && start <= band.endFreq) ||
-          (end >= band.startFreq && end <= band.endFreq) ||
-          (start <= band.startFreq && end >= band.endFreq)) {
+      const bandLow = band.low !== undefined ? band.low : band.startFreq;
+      const bandHigh = band.high !== undefined ? band.high : band.endFreq;
+      if ((start >= bandLow && start <= bandHigh) ||
+          (end >= bandLow && end <= bandHigh) ||
+          (start <= bandLow && end >= bandHigh)) {
         return true;
       }
     }
@@ -32,8 +34,8 @@ export const AddBandDialog = ({ onAddBand, existingBands }) => {
     }
     
     onAddBand({ 
-      startFreq, 
-      endFreq, 
+      low: startFreq, 
+      high: endFreq, 
       gain 
     });
     

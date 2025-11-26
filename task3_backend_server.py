@@ -670,6 +670,10 @@ def upload_wav_and_fft():
             real_fft = np.asarray(real_fft, dtype=np.float32)
             imag_fft = np.asarray(imag_fft, dtype=np.float32)
             complex_fft = real_fft + 1j * imag_fft
+            
+            # Store original FFT for comparison (before any modifications)
+            original_real_fft = real_fft.copy()
+            original_imag_fft = imag_fft.copy()
 
             # Parse frequency adjustments (supports JSON body or form fields 'adjustments' or 'bands')
             adjustments = None
@@ -708,7 +712,9 @@ def upload_wav_and_fft():
             print(f"FFT size N: {N}")
             print(f"Sample rate: {samplerate}")
             print(f"Nyquist frequency: {samplerate/2} Hz")
-            print(f"Bands received: {bands}")
+            print(f"Number of bands received: {len(bands) if bands else 0}")
+            if bands:
+                print(f"Bands summary: {[(b.get('low', 0), b.get('high', 0), b.get('gain', 1.0)) for b in bands]}")
             print(f"Adjustments received: {adjustments}")
 
             # Handle single-frequency adjustments given as a dict {"440": 0.5, ...}
@@ -741,7 +747,9 @@ def upload_wav_and_fft():
                         low = float(band.get('low', band.get('f0', 0.0)))
                         high = float(band.get('high', band.get('f1', low)))
                         gain = float(band.get('gain', band.get('g', 1.0)))
-                    except Exception:
+                        print(f"  Band {idx+1} raw data: low={band.get('low')}, high={band.get('high')}, gain={band.get('gain')} (parsed: {low:.0f}-{high:.0f}Hz, gain={gain:.3f})")
+                    except Exception as e:
+                        print(f"  Band {idx+1} PARSE ERROR: {e}")
                         continue
 
                     if low > high:
@@ -822,15 +830,17 @@ def upload_wav_and_fft():
             
             print("Starting spectrogram generation...")
             try:
-                # Generate input spectrogram
+                # Generate input spectrogram from ORIGINAL data
                 print(f"Generating input spectrogram for {len(data)} samples...")
                 input_spectrogram_data = generate_spectrogram_numpy(data)
                 print(f"Input spectrogram generated: {len(input_spectrogram_data)} frames")
                 
-                # Always generate output spectrogram from modified signal
-                # (even if bands=None, we still show the signal in output for comparison)
+                # Generate output spectrogram from MODIFIED FFT signal
+                # Use IFFT to get time-domain signal from modified complex_fft
                 print("Generating output spectrogram from modified signal...")
-                modified_signal = np.fft.ifft(complex_fft).real
+                modified_signal = np.fft.ifft(complex_fft).real.astype(np.float32)
+                # Trim to original length
+                modified_signal = modified_signal[:len(data)]
                 output_spectrogram_data = generate_spectrogram_numpy(modified_signal)
                 
                 if bands or adjustments:
@@ -860,11 +870,16 @@ def upload_wav_and_fft():
 
             response = {
                 "status": "success",
+                # Original FFT (before equalizer)
+                "original_fft_real": original_real_fft.tolist(),
+                "original_fft_imag": original_imag_fft.tolist(),
+                # Processed FFT (after equalizer)
                 "fft_real": modified_real.tolist(),
                 "fft_imag": modified_imag.tolist(),
                 "sample_rate": samplerate,
                 "fft_size": N,
                 "applied_adjustments": applied,
+                "has_modifications": bool(bands or adjustments),
                 "input_spectrogram": input_spectrogram_data,
                 "output_spectrogram": output_spectrogram_data,
                 "spectrogram_frequencies": frequencies.tolist() if frequencies is not None else None,
@@ -881,10 +896,12 @@ def upload_wav_and_fft():
                     # Trim to original length to avoid duration mismatch
                     time_signal = time_signal[:len(data)]
 
-                    # Normalize if necessary to avoid clipping when saving
-                    max_val = np.abs(time_signal).max()
-                    if max_val > 0:
-                        scale = 0.99 / max_val
+                    # Normalize based on original signal's peak to maintain relative scale
+                    original_max = np.abs(data).max()
+                    modified_max = np.abs(time_signal).max()
+                    if modified_max > 0 and original_max > 0:
+                        # Scale to match original dynamic range
+                        scale = (original_max * 0.99) / modified_max
                         time_signal = (time_signal * scale).astype(np.float32)
                     else:
                         time_signal = time_signal.astype(np.float32)

@@ -52,6 +52,12 @@ export const EqualizerControls = ({
   });
   const [isProcessing, setIsProcessing] = useState(false);
   const debounceTimerRef = React.useRef(null);
+  const latestValuesRef = React.useRef(values);
+  
+  // Keep ref in sync with state
+  React.useEffect(() => {
+    latestValuesRef.current = values;
+  }, [values]);
 
   useEffect(() => {
     if (mode === "generic") {
@@ -79,34 +85,91 @@ export const EqualizerControls = ({
       onBandGainChange(index, clampedValue);
     }
     
-    // Debounce: wait 800ms after last slider change before processing
+    // Debounce: Clear existing timer and start new one
+    // This ensures that ANY slider change resets the 1-second countdown
+    // Only after 1 second of NO changes will the API be called
     if (audioFile && onEqualizerChange) {
+      // Cancel any pending API call
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
+        console.log(`EqualizerControls: Timer reset - slider ${index} changed to ${clampedValue.toFixed(3)}x`);
+      } else {
+        console.log(`EqualizerControls: Timer started - slider ${index} changed to ${clampedValue.toFixed(3)}x`);
       }
       
-      // Show processing indicator immediately
+      // Show processing indicator to let user know changes are pending
       setIsProcessing(true);
       
+      // Start new 1-second countdown
       debounceTimerRef.current = setTimeout(async () => {
+        console.log('EqualizerControls: 1 second elapsed with no changes - calling API now');
         try {
-          // Build bands array from current values (use newValues which has all updated gains)
+          // Use the latest values from ref to avoid stale closure
+          const currentValues = latestValuesRef.current;
+          
+          // Build bands array with proper frequency ranges and current gains
           const bands = labels.map((label, idx) => {
+            const currentGain = currentValues[idx];
+            
             if (mode === "generic") {
               return {
-                low: customBands[idx]?.startFreq || customBands[idx]?.low || 0,
-                high: customBands[idx]?.endFreq || customBands[idx]?.high || 20000,
-                gain: newValues[idx] || 1.0  // Use individual band's gain from newValues
+                low: customBands[idx]?.low !== undefined ? customBands[idx].low : (customBands[idx]?.startFreq || 0),
+                high: customBands[idx]?.high !== undefined ? customBands[idx].high : (customBands[idx]?.endFreq || 20000),
+                gain: currentGain
               };
             }
+            
+            // Map proper frequency ranges for preset modes
+            let low = 0, high = 20000;
+            
+            if (mode === "music") {
+              const ranges = [
+                [60, 200],    // Drums
+                [80, 250],    // Bass
+                [200, 800],   // Guitar
+                [250, 4000],  // Piano
+                [300, 3500],  // Vocals
+                [500, 8000]   // Synth
+              ];
+              if (idx < ranges.length) {
+                [low, high] = ranges[idx];
+              }
+            } else if (mode === "animal") {
+              const ranges = [
+                [500, 1000],   // Dog
+                [600, 1500],   // Cat
+                [1000, 8000],  // Bird
+                [20, 200],     // Whale
+                [15, 100],     // Elephant
+                [400, 800]     // Wolf
+              ];
+              if (idx < ranges.length) {
+                [low, high] = ranges[idx];
+              }
+            } else if (mode === "human") {
+              const ranges = [
+                [85, 180],    // Male 1
+                [165, 255],   // Female 1
+                [250, 400],   // Child
+                [85, 180],    // Male 2
+                [165, 255],   // Female 2
+                [80, 200]     // Elder
+              ];
+              if (idx < ranges.length) {
+                [low, high] = ranges[idx];
+              }
+            }
+            
             return {
-              low: 0,
-              high: 20000,
-              gain: newValues[idx] || 1.0  // Use individual band's gain from newValues
+              low,
+              high,
+              gain: currentGain
             };
           });
           
-          console.log('EqualizerControls: Sending bands to backend:', bands);
+          console.log('EqualizerControls: Sending bands with actual gains:', bands);
+          console.log('Current slider values:', currentValues);
+          console.log('Bands detail:', bands.map((b, i) => `Band ${i+1}: ${b.low}-${b.high}Hz @ ${b.gain.toFixed(3)}x`).join(', '));
           await onEqualizerChange(bands);
         } catch (error) {
           console.error('Equalizer processing error:', error);
@@ -114,7 +177,7 @@ export const EqualizerControls = ({
         } finally {
           setIsProcessing(false);
         }
-      }, 800);
+      }, 1000);
     }
   };
 
@@ -159,7 +222,7 @@ export const EqualizerControls = ({
         {labels.map((label, index) => {
           const isGeneric = mode === "generic";
           const bandLabel = isGeneric 
-            ? `${customBands[index]?.low || customBands[index]?.startFreq || 0}-${customBands[index]?.high || customBands[index]?.endFreq || 0}Hz`
+            ? `${customBands[index]?.low !== undefined ? customBands[index].low : (customBands[index]?.startFreq || 0)}-${customBands[index]?.high !== undefined ? customBands[index].high : (customBands[index]?.endFreq || 0)}Hz`
             : label.label;
           const frequencyRange = isGeneric ? "" : label.range;
           const sliderValue = values[index] || 0;

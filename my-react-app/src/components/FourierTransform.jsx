@@ -1,43 +1,23 @@
 import React, { useRef, useEffect, useState } from 'react';
 
 /**
- * Generate FFT data from audio buffer using Web Audio API
- * This is client-side visualization only - processing happens on backend
+ * Convert backend FFT data to magnitude spectrum for visualization
  */
-const generateFFTData = (audioBuffer, fftSize = 2048) => {
-  if (!audioBuffer) {
-    throw new Error('No audio buffer provided');
+const convertBackendFFTToSpectrum = (fftReal, fftImag, sampleRate, fftSize) => {
+  if (!fftReal || !fftImag) {
+    throw new Error('No FFT data provided');
   }
 
-  const channelData = audioBuffer.getChannelData(0);
-  const sampleRate = audioBuffer.sampleRate;
-  
-  // Simple client-side FFT for visualization only
-  const bufferLength = fftSize / 2;
+  // Backend returns full FFT, we only need first half for visualization
+  const bufferLength = Math.floor(fftSize / 2);
   const magnitudes = new Float32Array(bufferLength);
   const frequencies = new Float32Array(bufferLength);
   
-  // Calculate frequencies
+  // Calculate frequencies and magnitudes
   for (let i = 0; i < bufferLength; i++) {
     frequencies[i] = (i * sampleRate) / fftSize;
-  }
-  
-  // Take middle section for analysis
-  const startSample = Math.floor((channelData.length - fftSize) / 2);
-  const analysisData = channelData.slice(startSample, startSample + fftSize);
-  
-  // Simple DFT for visualization
-  for (let k = 0; k < bufferLength; k++) {
-    let real = 0;
-    let imag = 0;
-    
-    for (let n = 0; n < Math.min(fftSize, analysisData.length); n++) {
-      const angle = (-2 * Math.PI * k * n) / fftSize;
-      real += analysisData[n] * Math.cos(angle);
-      imag += analysisData[n] * Math.sin(angle);
-    }
-    
-    magnitudes[k] = Math.sqrt(real * real + imag * imag) / fftSize;
+    // Magnitude = sqrt(real^2 + imag^2)
+    magnitudes[i] = Math.sqrt(fftReal[i] * fftReal[i] + fftImag[i] * fftImag[i]);
   }
   
   return { frequencies, magnitudes, sampleRate, fftSize, bufferLength };
@@ -46,41 +26,60 @@ const generateFFTData = (audioBuffer, fftSize = 2048) => {
 export const FourierTransform = ({ 
   label = "Fourier Transform",
   scaleType = "linear",
-  audioBuffer = null,
-  outputAudioBuffer = null
+  backendFFTData = null  // Use backend FFT data instead of audio buffers
 }) => {
   const canvasRef = useRef(null);
-  const [fftData, setFftData] = useState(null);
+  const [inputFftData, setInputFftData] = useState(null);
   const [outputFftData, setOutputFftData] = useState(null);
 
-  // Generate FFT data from audio buffers (client-side visualization only)
+  // Process backend FFT data when it changes
   useEffect(() => {
-    if (audioBuffer) {
-      try {
-        const data = generateFFTData(audioBuffer, 2048);
-        setFftData(data);
-        console.log('FourierTransform: FFT generated for input (visualization only)');
-      } catch (error) {
-        console.error('FourierTransform: Error generating input FFT:', error);
-      }
-    } else {
-      setFftData(null);
-    }
-  }, [audioBuffer]);
-
-  useEffect(() => {
-    if (outputAudioBuffer) {
-      try {
-        const data = generateFFTData(outputAudioBuffer, 2048);
-        setOutputFftData(data);
-        console.log('FourierTransform: FFT generated for output (visualization only)');
-      } catch (error) {
-        console.error('FourierTransform: Error generating output FFT:', error);
-      }
-    } else {
+    if (!backendFFTData) {
+      setInputFftData(null);
       setOutputFftData(null);
+      return;
     }
-  }, [outputAudioBuffer]);
+
+    try {
+      const { originalFftReal, originalFftImag, fftReal, fftImag, sampleRate, fftSize, hasModifications } = backendFFTData;
+      
+      if (!fftReal || !fftImag) {
+        console.warn('FourierTransform: Missing processed FFT data from backend');
+        return;
+      }
+
+      // Convert original FFT (before equalizer)
+      if (originalFftReal && originalFftImag) {
+        const inputSpectrum = convertBackendFFTToSpectrum(originalFftReal, originalFftImag, sampleRate, fftSize);
+        setInputFftData(inputSpectrum);
+      } else {
+        setInputFftData(null);
+      }
+      
+      // Convert processed FFT (after equalizer)
+      const outputSpectrum = convertBackendFFTToSpectrum(fftReal, fftImag, sampleRate, fftSize);
+      setOutputFftData(outputSpectrum);
+      
+      // Find min/max magnitude iteratively to avoid stack overflow
+      let minMag = Infinity, maxMag = -Infinity;
+      for (let i = 0; i < outputSpectrum.magnitudes.length; i++) {
+        const mag = outputSpectrum.magnitudes[i];
+        if (mag < minMag) minMag = mag;
+        if (mag > maxMag) maxMag = mag;
+      }
+      
+      console.log('FourierTransform: Loaded FFT comparison', {
+        fftSize,
+        sampleRate,
+        hasModifications,
+        hasOriginal: !!(originalFftReal && originalFftImag),
+        frequencyRange: [outputSpectrum.frequencies[0], outputSpectrum.frequencies[outputSpectrum.frequencies.length - 1]],
+        outputMagnitudeRange: [minMag, maxMag]
+      });
+    } catch (error) {
+      console.error('FourierTransform: Error processing backend FFT:', error);
+    }
+  }, [backendFFTData]);
 
   const drawSpectrum = () => {
     const canvas = canvasRef.current;
@@ -92,8 +91,8 @@ export const FourierTransform = ({
     const width = canvas.width;
     const height = canvas.height;
     
-    // If no data available, don't draw
-    if (!fftData) {
+    // If no output data available, don't draw
+    if (!outputFftData) {
       ctx.fillStyle = '#0f1419';
       ctx.fillRect(0, 0, width, height);
       ctx.fillStyle = '#94a3b8';
@@ -135,69 +134,98 @@ export const FourierTransform = ({
     ctx.setLineDash([]);
 
     // Get data for plotting
-    const inputFreqs = fftData.frequencies;
-    const inputMags = fftData.magnitudes;
-    const outputFreqs = outputFftData?.frequencies;
-    const outputMags = outputFftData?.magnitudes;
+    const hasInputData = inputFftData && inputFftData.magnitudes;
+    const hasOutputData = outputFftData && outputFftData.magnitudes;
+    
+    if (!hasOutputData) return;
+    
+    const outputFreqs = outputFftData.frequencies;
+    const outputMags = outputFftData.magnitudes;
+    
+    // Calculate max magnitude for normalization (iterate to avoid stack overflow)
+    let maxMag = 0;
+    for (let i = 0; i < outputMags.length; i++) {
+      if (outputMags[i] > maxMag) maxMag = outputMags[i];
+    }
+    if (hasInputData) {
+      const inputMags = inputFftData.magnitudes;
+      for (let i = 0; i < inputMags.length; i++) {
+        if (inputMags[i] > maxMag) maxMag = inputMags[i];
+      }
+    }
+    
+    if (maxMag === 0) {
+      console.warn('FourierTransform: All magnitudes are zero!');
+      return;
+    }
 
-    // Normalize magnitudes for visualization (0-1 range)
-    const maxMag = Math.max(...inputMags, ...(outputMags || []));
-    const normInput = inputMags.map(m => m / maxMag);
-    const normOutput = outputMags?.map(m => m / maxMag);
-
-    // Draw frequency responses
-    if (outputFftData && normOutput) {
-      // Dual spectrum (comparison mode - show both input and output)
+    // Draw frequency response
+    if (hasInputData) {
+      // Dual spectrum - show both input (green) and output (purple) for comparison
+      const inputFreqs = inputFftData.frequencies;
+      const inputMags = inputFftData.magnitudes;
+      const normInput = inputMags.map(m => m / maxMag);
+      const normOutput = outputMags.map(m => m / maxMag);
+      
+      // Draw input spectrum (original - before equalizer)
       ctx.strokeStyle = '#22c55e';
       ctx.lineWidth = 2;
-      ctx.globalAlpha = 0.8;
+      ctx.globalAlpha = 0.7;
       ctx.beginPath();
 
+      let inputPointsDrawn = 0;
       for (let i = 0; i < normInput.length; i++) {
         let x;
         if (scaleType === "audiogram") {
           const freq = inputFreqs[i];
-          if (freq < 125) continue;
-          x = padding.left + (Math.log10(freq / 125) / Math.log10(8000 / 125)) * chartWidth;
+          if (freq < 125 || freq > 8000) continue;
+          // Proper log scale: log10(freq/125) / log10(8000/125)
+          const logScale = Math.log10(freq / 125) / Math.log10(8000 / 125);
+          x = padding.left + logScale * chartWidth;
         } else {
           x = padding.left + (i / normInput.length) * chartWidth;
         }
         
-        const value = Math.min(1, normInput[i]);
+        const value = Math.min(1, Math.max(0, normInput[i]));
         const y = padding.top + chartHeight - (value * chartHeight * 0.8);
         
-        if (i === 0) {
+        if (inputPointsDrawn === 0) {
           ctx.moveTo(x, y);
         } else {
           ctx.lineTo(x, y);
         }
+        inputPointsDrawn++;
       }
       ctx.stroke();
 
-      // Draw second frequency response (output)
+      // Draw output spectrum (processed - after equalizer)
       ctx.strokeStyle = '#a855f7';
-      ctx.lineWidth = 2;
-      ctx.globalAlpha = 0.8;
+      ctx.lineWidth = 2.5;
+      ctx.globalAlpha = 0.9;
       ctx.beginPath();
 
+      let outputPointsDrawn = 0;
       for (let i = 0; i < normOutput.length; i++) {
         let x;
         if (scaleType === "audiogram") {
           const freq = outputFreqs[i];
-          if (freq < 125) continue;
-          x = padding.left + (Math.log10(freq / 125) / Math.log10(8000 / 125)) * chartWidth;
+          if (freq < 125 || freq > 8000) continue;
+          // Proper log scale: log10(freq/125) / log10(8000/125)
+          const logScale = Math.log10(freq / 125) / Math.log10(8000 / 125);
+          x = padding.left + logScale * chartWidth;
         } else {
           x = padding.left + (i / normOutput.length) * chartWidth;
         }
         
-        const value = Math.min(1, normOutput[i]);
+        const value = Math.min(1, Math.max(0, normOutput[i]));
         const y = padding.top + chartHeight - (value * chartHeight * 0.8);
         
-        if (i === 0) {
+        if (outputPointsDrawn === 0) {
           ctx.moveTo(x, y);
         } else {
           ctx.lineTo(x, y);
         }
+        outputPointsDrawn++;
       }
       ctx.stroke();
       ctx.globalAlpha = 1.0;
@@ -207,14 +235,16 @@ export const FourierTransform = ({
       ctx.fillRect(padding.left, 5, 15, 8);
       ctx.fillStyle = '#e4e4e7';
       ctx.font = '11px sans-serif';
-      ctx.fillText('Input', padding.left + 20, 12);
+      ctx.fillText('Original', padding.left + 20, 12);
       
       ctx.fillStyle = '#a855f7';
-      ctx.fillRect(padding.left + 80, 5, 15, 8);
+      ctx.fillRect(padding.left + 90, 5, 15, 8);
       ctx.fillStyle = '#e4e4e7';
-      ctx.fillText('Output', padding.left + 100, 12);
+      ctx.fillText('Equalized', padding.left + 110, 12);
     } else {
-      // Single spectrum
+      // Single spectrum showing PROCESSED audio only
+      const normOutput = outputMags.map(m => m / maxMag);
+      
       const gradient = ctx.createLinearGradient(padding.left, 0, width - padding.right, 0);
       gradient.addColorStop(0, '#3b82f6');
       gradient.addColorStop(0.5, '#8b5cf6');
@@ -224,26 +254,33 @@ export const FourierTransform = ({
       ctx.lineWidth = 2.5;
       ctx.beginPath();
 
-      for (let i = 0; i < normInput.length; i++) {
+      let pointsDrawn = 0;
+      for (let i = 0; i < normOutput.length; i++) {
         let x;
         if (scaleType === "audiogram") {
-          const freq = inputFreqs[i];
-          if (freq < 125) continue;
-          x = padding.left + (Math.log10(freq / 125) / Math.log10(8000 / 125)) * chartWidth;
+          const freq = outputFreqs[i];
+          if (freq < 125 || freq > 8000) continue;
+          // Proper log scale: log10(freq/125) / log10(8000/125)
+          const logScale = Math.log10(freq / 125) / Math.log10(8000 / 125);
+          x = padding.left + logScale * chartWidth;
         } else {
-          x = padding.left + (i / normInput.length) * chartWidth;
+          x = padding.left + (i / normOutput.length) * chartWidth;
         }
         
-        const value = Math.min(1, normInput[i]);
+        const value = Math.min(1, Math.max(0, normOutput[i]));
         const y = padding.top + chartHeight - (value * chartHeight * 0.8);
         
-        if (i === 0) {
+        if (pointsDrawn === 0) {
           ctx.moveTo(x, y);
         } else {
           ctx.lineTo(x, y);
         }
+        pointsDrawn++;
       }
-      ctx.stroke();
+      
+      if (pointsDrawn > 0) {
+        ctx.stroke();
+      }
     }
 
     // Draw X-axis labels (frequency)
@@ -254,7 +291,8 @@ export const FourierTransform = ({
     if (scaleType === "audiogram") {
       const frequencies = [125, 250, 500, 1000, 2000, 4000, 8000];
       frequencies.forEach((freq) => {
-        const x = padding.left + Math.log10(freq / 125 + 1) / Math.log10(65) * chartWidth;
+        const logScale = Math.log10(freq / 125) / Math.log10(8000 / 125);
+        const x = padding.left + logScale * chartWidth;
         ctx.fillText(freq >= 1000 ? `${freq/1000}k` : `${freq}`, x, height - 8);
       });
     } else {
@@ -281,7 +319,7 @@ export const FourierTransform = ({
     window.addEventListener('resize', updateSize);
 
     return () => window.removeEventListener('resize', updateSize);
-  }, [scaleType, fftData, outputFftData]);
+  }, [scaleType, inputFftData, outputFftData]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', height: '100%', minHeight: 0 }}>

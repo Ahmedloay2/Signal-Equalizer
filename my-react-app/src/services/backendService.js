@@ -86,10 +86,15 @@ export const uploadAndProcessFFT = async (audioFile, bands = []) => {
     
     return {
       success: true,
+      // Original FFT (before processing)
+      originalFftReal: result.original_fft_real,
+      originalFftImag: result.original_fft_imag,
+      // Processed FFT (after equalizer)
       fftReal: result.fft_real,
       fftImag: result.fft_imag,
       sampleRate: result.sample_rate,
       fftSize: result.fft_size,
+      hasModifications: result.has_modifications,
       appliedAdjustments: result.applied_adjustments || [],
       outputAudioUrl: result.outputAudioUrl,
       modifiedWav: result.modified_wav,
@@ -117,11 +122,18 @@ export const uploadAndProcessFFT = async (audioFile, bands = []) => {
 export const updateEqualizerGains = async (audioFile, bands) => {
   try {
     // Convert bands to backend format: [{low, high, gain}]
-    const backendBands = bands.map(band => ({
-      low: parseFloat(band.low || band.startFreq || band.start_freq || 0),
-      high: parseFloat(band.high || band.endFreq || band.end_freq || 20000),
-      gain: parseFloat(band.gain || 1.0)
-    }));
+    const backendBands = bands.map(band => {
+      // Use explicit undefined/null checks to preserve 0 values
+      const low = band.low !== undefined ? parseFloat(band.low) : 
+                  (band.startFreq !== undefined ? parseFloat(band.startFreq) : 
+                  (band.start_freq !== undefined ? parseFloat(band.start_freq) : 0));
+      const high = band.high !== undefined ? parseFloat(band.high) : 
+                   (band.endFreq !== undefined ? parseFloat(band.endFreq) : 
+                   (band.end_freq !== undefined ? parseFloat(band.end_freq) : 20000));
+      const gain = band.gain !== undefined ? parseFloat(band.gain) : 1.0;
+      
+      return { low, high, gain };
+    });
     
     // Check which bands have modifications (for logging only)
     const modifiedBands = backendBands.filter(band => Math.abs(band.gain - 1.0) > 0.001);
@@ -147,28 +159,28 @@ export const updateEqualizerGains = async (audioFile, bands) => {
 export const getEqualizerPreset = (presetName) => {
   const presets = {
     flat: [
-      { startFreq: 0, endFreq: 5000, gain: 1.0 },
-      { startFreq: 5000, endFreq: 10000, gain: 1.0 },
-      { startFreq: 10000, endFreq: 15000, gain: 1.0 },
-      { startFreq: 15000, endFreq: 20000, gain: 1.0 }
+      { low: 0, high: 5000, gain: 1.0 },
+      { low: 5000, high: 10000, gain: 1.0 },
+      { low: 10000, high: 15000, gain: 1.0 },
+      { low: 15000, high: 20000, gain: 1.0 }
     ],
     bass_boost: [
-      { startFreq: 0, endFreq: 250, gain: 1.5 },
-      { startFreq: 250, endFreq: 1000, gain: 1.2 },
-      { startFreq: 1000, endFreq: 5000, gain: 1.0 },
-      { startFreq: 5000, endFreq: 20000, gain: 0.9 }
+      { low: 0, high: 250, gain: 1.5 },
+      { low: 250, high: 1000, gain: 1.2 },
+      { low: 1000, high: 5000, gain: 1.0 },
+      { low: 5000, high: 20000, gain: 0.9 }
     ],
     treble_boost: [
-      { startFreq: 0, endFreq: 1000, gain: 0.9 },
-      { startFreq: 1000, endFreq: 5000, gain: 1.0 },
-      { startFreq: 5000, endFreq: 10000, gain: 1.2 },
-      { startFreq: 10000, endFreq: 20000, gain: 1.5 }
+      { low: 0, high: 1000, gain: 0.9 },
+      { low: 1000, high: 5000, gain: 1.0 },
+      { low: 5000, high: 10000, gain: 1.2 },
+      { low: 10000, high: 20000, gain: 1.5 }
     ],
     vocal_enhance: [
-      { startFreq: 0, endFreq: 300, gain: 0.8 },
-      { startFreq: 300, endFreq: 3500, gain: 1.3 },
-      { startFreq: 3500, endFreq: 8000, gain: 1.1 },
-      { startFreq: 8000, endFreq: 20000, gain: 0.9 }
+      { low: 0, high: 300, gain: 0.8 },
+      { low: 300, high: 3500, gain: 1.3 },
+      { low: 3500, high: 8000, gain: 1.1 },
+      { low: 8000, high: 20000, gain: 0.9 }
     ]
   };
   

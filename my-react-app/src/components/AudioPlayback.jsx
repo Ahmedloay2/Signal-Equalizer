@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 
-export const AudioPlayback = ({ label, variant, playbackState, onPlaybackStateChange, audioBuffer = null, isProcessing = false }) => {
+export const AudioPlayback = ({ label, variant, playbackState, onPlaybackStateChange, audioBuffer = null, inputAudioBuffer = null, isProcessing = false }) => {
   const canvasRef = useRef(null);
   const audioContextRef = useRef(null);
   const audioSourceRef = useRef(null);
@@ -9,12 +9,14 @@ export const AudioPlayback = ({ label, variant, playbackState, onPlaybackStateCh
   const animationFrameRef = useRef(null);
   const [actualDuration, setActualDuration] = useState(0);
   const waveformData = useRef(null);
+  const normalizationScale = useRef(1.0);
   
   // Generate waveform from audio buffer
   useEffect(() => {
     if (!audioBuffer) {
       setActualDuration(0);
       waveformData.current = null;
+      normalizationScale.current = 1.0;
       return;
     }
 
@@ -36,12 +38,38 @@ export const AudioPlayback = ({ label, variant, playbackState, onPlaybackStateCh
         filteredData[i] = sum / blockSize;
       }
       
+      // For output signal, normalize to input signal's scale for proper comparison
+      if (variant === 'output' && inputAudioBuffer) {
+        const inputData = inputAudioBuffer.getChannelData(0);
+        let inputMax = 0;
+        for (let i = 0; i < inputData.length; i++) {
+          const val = Math.abs(inputData[i]);
+          if (val > inputMax) inputMax = val;
+        }
+        
+        let outputMax = 0;
+        for (let i = 0; i < rawData.length; i++) {
+          const val = Math.abs(rawData[i]);
+          if (val > outputMax) outputMax = val;
+        }
+        
+        // Calculate scale factor to match input amplitude
+        if (outputMax > 0 && inputMax > 0) {
+          normalizationScale.current = inputMax / outputMax;
+          console.log(`AudioPlayback (output): Normalizing to input scale - inputMax: ${inputMax.toFixed(4)}, outputMax: ${outputMax.toFixed(4)}, scale: ${normalizationScale.current.toFixed(4)}`);
+        } else {
+          normalizationScale.current = 1.0;
+        }
+      } else {
+        normalizationScale.current = 1.0;
+      }
+      
       waveformData.current = filteredData;
       console.log(`AudioPlayback (${variant}): Waveform generated, duration: ${audioBuffer.duration.toFixed(2)}s`);
     } catch (error) {
       console.error(`AudioPlayback (${variant}): Error generating waveform:`, error);
     }
-  }, [audioBuffer, variant]);
+  }, [audioBuffer, inputAudioBuffer, variant]);
   
   const duration = actualDuration || 10;
   const { isPlaying, isPaused, time, speed } = playbackState || {
@@ -98,7 +126,7 @@ export const AudioPlayback = ({ label, variant, playbackState, onPlaybackStateCh
       const sampleIndex = Math.floor(startSample + x * samplesPerPixel);
       if (sampleIndex >= data.length) break;
       
-      const sample = data[sampleIndex];
+      const sample = data[sampleIndex] * normalizationScale.current;
       const y = height / 2 - (sample * height * 0.4);
       
       if (x === 0) {

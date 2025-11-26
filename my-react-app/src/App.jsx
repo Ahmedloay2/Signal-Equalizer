@@ -267,8 +267,8 @@ function App() {
       // Set uploaded file
       setUploadedAudioFile(file);
       
-      // For equalizer modes, process with backend to get FFT (no gains applied initially)
-      if (currentMode === 'generic' || currentMode === 'music' || currentMode === 'animal' || currentMode === 'human') {
+      // For equalizer modes (NOT AI separation), process with backend to get FFT (no gains applied initially)
+      if (currentSubMode !== 'ai' && (currentMode === 'generic' || currentMode === 'music' || currentMode === 'animal' || currentMode === 'human')) {
         console.log('Processing audio with backend (no gains)...');
         
         // Upload to backend WITHOUT any gain adjustments (empty bands array)
@@ -289,7 +289,8 @@ function App() {
         // Small delay to ensure state updates complete before rendering
         await new Promise(resolve => setTimeout(resolve, 100));
       } else {
-        // For separation modes, just show input initially
+        // For AI separation modes, just show input initially (no backend FFT processing)
+        console.log('AI mode: Setting audio buffers without backend processing...');
         setInputAudioBuffer(audioBuffer);
         setOutputAudioBuffer(audioBuffer);
         
@@ -307,7 +308,7 @@ function App() {
       setIsLoadingAudio(false);
       console.log('Upload process complete');
     }
-  }, [currentMode]);
+  }, [currentMode, currentSubMode]);
 
   return (
     <div className="app">
@@ -354,6 +355,7 @@ function App() {
               uploadedFile={uploadedAudioFile} 
               currentMode={currentMode}
               showSpectrograms={showSpectrograms}
+              inputAudioBuffer={inputAudioBuffer}
             />
           ) : (
             <>

@@ -29,8 +29,8 @@ CORS(app)  # Enable CORS for React frontend
 
 # Configuration
 UPLOAD_FOLDER = tempfile.mkdtemp(prefix='dsp_task3_uploads_')
-OUTPUT_FOLDER = Path('./output')
-CACHE_FOLDER = Path('./cache')
+OUTPUT_FOLDER = Path('./output').resolve()  # Resolve to absolute path
+CACHE_FOLDER = Path('./cache').resolve()  # Resolve to absolute path
 ALLOWED_EXTENSIONS = {'mp3', 'wav', 'flac', 'ogg', 'aac', 'm4a', 'wma'}
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -224,7 +224,24 @@ def separate_instruments():
         
         print(f"✅ Separation complete!")
         
+        # Convert absolute paths to relative paths for download endpoint
+        # Only include files that actually exist (signal detection)
+        files = {}
+        if 'separated_stems_full' in result:
+            # Resolve OUTPUT_FOLDER to absolute path
+            output_folder_abs = OUTPUT_FOLDER.resolve()
+            for stem_name, abs_path in result['separated_stems_full'].items():
+                # Check if file actually exists (signal detection may have skipped it)
+                abs_path_obj = Path(abs_path)
+                if abs_path_obj.exists():
+                    # Convert absolute path to relative path from OUTPUT_FOLDER
+                    rel_path = abs_path_obj.relative_to(output_folder_abs)
+                    files[stem_name] = str(rel_path).replace('\\', '/')
+                else:
+                    print(f"⏭️  Skipping {stem_name} - file doesn't exist (no signal)")
+        
         result['session_id'] = session_id
+        result['files'] = files  # Add 'files' key for frontend compatibility
         return jsonify(result)
         
     except Exception as e:
@@ -354,7 +371,19 @@ def separate_voices():
         
         print(f"✅ Voice separation complete!")
         
+        # Convert absolute paths to relative paths for download endpoint
+        files = []
+        if 'separated_sources' in result:
+            # Resolve OUTPUT_FOLDER to absolute path
+            output_folder_abs = OUTPUT_FOLDER.resolve()
+            for abs_path in result['separated_sources']:
+                # Convert absolute path to relative path from OUTPUT_FOLDER
+                abs_path_obj = Path(abs_path)
+                rel_path = abs_path_obj.relative_to(output_folder_abs)
+                files.append(str(rel_path).replace('\\', '/'))
+        
         result['session_id'] = session_id
+        result['files'] = files  # Add 'files' key for frontend compatibility
         return jsonify(result)
         
     except Exception as e:

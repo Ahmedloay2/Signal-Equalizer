@@ -7,13 +7,19 @@ import { FourierTransform } from './FourierTransform';
 import { Spectrogram } from './Spectrogram';
 import { AudioPlayback } from './AudioPlayback';
 
-export const AudioSeparation = ({ uploadedFile, currentMode, showSpectrograms }) => {
+export const AudioSeparation = ({ uploadedFile, currentMode, showSpectrograms, inputAudioBuffer: parentInputAudioBuffer }) => {
   const [stage, setStage] = useState('initial'); // 'initial', 'separating', 'separated'
   const [inputAudioBuffer, setInputAudioBuffer] = useState(null);
   const [outputAudioBuffer, setOutputAudioBuffer] = useState(null);
   const [separatedTracks, setSeparatedTracks] = useState([]);
   const [progress, setProgress] = useState(0);
   const [audioSource, setAudioSource] = useState('mock'); // 'mock' or 'uploaded'
+  const [fftData, setFftData] = useState(null); // FFT data from backend
+  const [inputFftData, setInputFftData] = useState(null); // Input FFT data
+  const [outputFftData, setOutputFftData] = useState(null); // Output FFT data
+  const [isLoadingFFT, setIsLoadingFFT] = useState(false); // FFT loading state
+  const [isLoadingSeparation, setIsLoadingSeparation] = useState(false); // Separation loading state
+  const [isProcessingGain, setIsProcessingGain] = useState(false); // Gain processing indicator
   
   // Synchronized playback state for input and output
   const [playbackState, setPlaybackState] = useState({
@@ -42,9 +48,121 @@ export const AudioSeparation = ({ uploadedFile, currentMode, showSpectrograms })
     };
   }, []);
 
-  // Handle uploaded file
+  // Fetch FFT data from backend for the uploaded file
   useEffect(() => {
-    if (uploadedFile && audioContextRef.current) {
+    if (uploadedFile && stage === 'initial') {
+      const fetchFFT = async () => {
+        try {
+          setIsLoadingFFT(true);
+          console.log('AudioSeparation: Fetching FFT from backend for', uploadedFile.name);
+          const { uploadAndProcessFFT } = await import('../services/backendService');
+          const result = await uploadAndProcessFFT(uploadedFile, []);
+          setFftData(result);
+          setInputFftData(result);
+          console.log('AudioSeparation: FFT data received');
+        } catch (error) {
+          console.error('AudioSeparation: Error fetching FFT:', error);
+        } finally {
+          setIsLoadingFFT(false);
+        }
+      };
+      fetchFFT();
+    }
+  }, [uploadedFile, stage]);
+
+  // Fetch FFT for output buffer when separated
+  useEffect(() => {
+    if (outputAudioBuffer && stage === 'separated') {
+      const fetchOutputFFT = async () => {
+        try {
+          setIsLoadingFFT(true);
+          // Convert output buffer to WAV and get FFT
+          const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+          const offlineContext = new OfflineAudioContext(
+            outputAudioBuffer.numberOfChannels,
+            outputAudioBuffer.length,
+            outputAudioBuffer.sampleRate
+          );
+          
+          const source = offlineContext.createBufferSource();
+          source.buffer = outputAudioBuffer;
+          source.connect(offlineContext.destination);
+          source.start();
+          
+          await offlineContext.startRendering();
+          
+          // Create a temporary file from output buffer
+          const wavBlob = await audioBufferToWav(outputAudioBuffer);
+          const wavFile = new File([wavBlob], 'output.wav', { type: 'audio/wav' });
+          
+          const { uploadAndProcessFFT } = await import('../services/backendService');
+          const result = await uploadAndProcessFFT(wavFile, []);
+          setOutputFftData(result);
+          console.log('AudioSeparation: Output FFT data received');
+        } catch (error) {
+          console.error('AudioSeparation: Error fetching output FFT:', error);
+        } finally {
+          setIsLoadingFFT(false);
+        }
+      };
+      fetchOutputFFT();
+    }
+  }, [outputAudioBuffer, stage]);
+
+  // Helper to convert AudioBuffer to WAV
+  const audioBufferToWav = (buffer) => {
+    const length = buffer.length * buffer.numberOfChannels * 2;
+    const arrayBuffer = new ArrayBuffer(44 + length);
+    const view = new DataView(arrayBuffer);
+    const channels = [];
+    let offset = 0;
+    
+    // WAV header
+    const writeString = (view, offset, str) => {
+      for (let i = 0; i < str.length; i++) {
+        view.setUint8(offset + i, str.charCodeAt(i));
+      }
+    };
+    
+    writeString(view, 0, 'RIFF');
+    view.setUint32(4, 36 + length, true);
+    writeString(view, 8, 'WAVE');
+    writeString(view, 12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, buffer.numberOfChannels, true);
+    view.setUint32(24, buffer.sampleRate, true);
+    view.setUint32(28, buffer.sampleRate * buffer.numberOfChannels * 2, true);
+    view.setUint16(32, buffer.numberOfChannels * 2, true);
+    view.setUint16(34, 16, true);
+    writeString(view, 36, 'data');
+    view.setUint32(40, length, true);
+    offset = 44;
+    
+    // Interleave channels
+    for (let i = 0; i < buffer.numberOfChannels; i++) {
+      channels.push(buffer.getChannelData(i));
+    }
+    
+    for (let i = 0; i < buffer.length; i++) {
+      for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+        const sample = Math.max(-1, Math.min(1, channels[channel][i]));
+        view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+        offset += 2;
+      }
+    }
+    
+    return new Blob([arrayBuffer], { type: 'audio/wav' });
+  };
+
+  // Handle uploaded file - use parent's audio buffer if available
+  useEffect(() => {
+    if (parentInputAudioBuffer) {
+      console.log('AudioSeparation: Using parent audio buffer');
+      setInputAudioBuffer(parentInputAudioBuffer);
+      setAudioSource('uploaded');
+      setStage('initial'); // Reset to initial stage if already separated
+    } else if (uploadedFile && audioContextRef.current) {
       console.log('AudioSeparation: Loading file', uploadedFile.name);
       const loadFile = async () => {
         try {
@@ -63,7 +181,7 @@ export const AudioSeparation = ({ uploadedFile, currentMode, showSpectrograms })
     } else {
       console.log('AudioSeparation: No uploaded file or audio context not ready');
     }
-  }, [uploadedFile]);
+  }, [uploadedFile, parentInputAudioBuffer]);
 
   // Auto-update output whenever separated tracks change
   useEffect(() => {
@@ -106,6 +224,7 @@ export const AudioSeparation = ({ uploadedFile, currentMode, showSpectrograms })
 
     setStage('separating');
     setProgress(0);
+    setIsLoadingSeparation(true);
 
     try {
       let result;
@@ -131,22 +250,31 @@ export const AudioSeparation = ({ uploadedFile, currentMode, showSpectrograms })
         
         result = await separateInstruments(uploadedFile, gains, sessionId, onProgress);
         
-        // Load audio buffers for each separated track
-        const tracks = await Promise.all([
+        // Load audio buffers for each separated track - only if file exists
+        const allTracks = [
           { id: 'drums', name: 'Drums', file: result.files?.drums },
           { id: 'bass', name: 'Bass', file: result.files?.bass },
           { id: 'vocals', name: 'Vocals', file: result.files?.vocals },
           { id: 'guitar', name: 'Guitar', file: result.files?.guitar },
           { id: 'piano', name: 'Piano', file: result.files?.piano },
           { id: 'other', name: 'Other', file: result.files?.other }
-        ].map(async (track) => {
-          if (track.file) {
-            const audioBuffer = await loadAudioFile(`http://localhost:5001/api/download/${track.file}`);
-            return { ...track, audioBuffer, gain: 1.0, muted: false, solo: false };
-          }
-          return { ...track, audioBuffer: inputAudioBuffer, gain: 1.0, muted: false, solo: false };
-        }));
+        ];
         
+        const tracks = [];
+        for (const track of allTracks) {
+          if (track.file) {
+            try {
+              const audioBuffer = await loadAudioFile(`http://localhost:5001/api/download/${track.file}`);
+              tracks.push({ ...track, audioBuffer, originalBuffer: audioBuffer, gain: 1.0, muted: false, solo: false });
+            } catch (error) {
+              console.warn(`Failed to load ${track.name}:`, error);
+            }
+          } else {
+            console.log(`Skipping ${track.name} - no file from backend (silent track)`);
+          }
+        }
+        
+        console.log(`Loaded ${tracks.length} tracks with signal`);
         setSeparatedTracks(tracks);
       } else {
         // Voice separation
@@ -155,47 +283,85 @@ export const AudioSeparation = ({ uploadedFile, currentMode, showSpectrograms })
         
         result = await separateVoices(uploadedFile, gains, sessionId, onProgress);
         
-        // Load audio buffers for each voice
+        // Load audio buffers for each voice (skip empty files)
         const tracks = await Promise.all(
-          (result.files || []).map(async (file, index) => {
-            const audioBuffer = await loadAudioFile(`http://localhost:5001/api/download/${file}`);
-            return {
-              id: `voice_${index}`,
-              name: `Voice ${index + 1}`,
-              audioBuffer,
-              gain: 1.0,
-              muted: false,
-              solo: false
-            };
+          (result.files || []).filter(file => file).map(async (file, index) => {
+            try {
+              const audioBuffer = await loadAudioFile(`http://localhost:5001/api/download/${file}`);
+              return {
+                id: `voice_${index}`,
+                name: `Voice ${index + 1}`,
+                audioBuffer,
+                originalBuffer: audioBuffer,
+                gain: 1.0,
+                muted: false,
+                solo: false
+              };
+            } catch (error) {
+              console.warn(`Failed to load voice ${index}:`, error);
+              return null;
+            }
           })
         );
         
-        setSeparatedTracks(tracks);
+        setSeparatedTracks(tracks.filter(t => t !== null));
       }
       
       setProgress(100);
+      console.log('Separation complete, tracks loaded');
+      setIsLoadingSeparation(false);
       setStage('separated');
-      console.log('Separation complete!');
     } catch (error) {
       console.error('Separation error:', error);
       alert(`Failed to separate audio: ${error.message}`);
       setStage('initial');
       setProgress(0);
+      setIsLoadingSeparation(false);
     }
   };
 
   // Handle track control changes
   const handleGainChange = (trackId, newGain) => {
+    setIsProcessingGain(true);
+    
     setSeparatedTracks(prev => 
-      prev.map(track => 
-        track.id === trackId ? { ...track, gain: newGain } : track
-      )
+      prev.map(track => {
+        if (track.id === trackId) {
+          // Apply gain to the track's audio buffer (like equalizer does)
+          const originalBuffer = track.originalBuffer || track.audioBuffer;
+          const ctx = audioContextRef.current;
+          
+          if (ctx && originalBuffer) {
+            // Create new buffer with gain applied
+            const newBuffer = ctx.createBuffer(
+              originalBuffer.numberOfChannels,
+              originalBuffer.length,
+              originalBuffer.sampleRate
+            );
+            
+            for (let ch = 0; ch < originalBuffer.numberOfChannels; ch++) {
+              const inputData = originalBuffer.getChannelData(ch);
+              const outputData = newBuffer.getChannelData(ch);
+              for (let i = 0; i < inputData.length; i++) {
+                outputData[i] = inputData[i] * newGain;
+              }
+            }
+            
+            return { ...track, gain: newGain, audioBuffer: newBuffer, originalBuffer };
+          }
+          return { ...track, gain: newGain };
+        }
+        return track;
+      })
     );
 
     // Update gain in real-time if playing
     if (gainNodesRef.current[trackId]?.gainNode) {
       gainNodesRef.current[trackId].gainNode.gain.value = newGain;
     }
+    
+    // Clear processing indicator after a short delay
+    setTimeout(() => setIsProcessingGain(false), 500);
     // Output will auto-update via useEffect
   };
 
@@ -237,30 +403,38 @@ export const AudioSeparation = ({ uploadedFile, currentMode, showSpectrograms })
               variant="input"
               playbackState={playbackState}
               onPlaybackStateChange={setPlaybackState}
-            />
-          </div>
-
-          <div className="fourier-grid">
-            <FourierTransform 
-              label="Fourier Transform - Linear Scale"
-              scaleType="linear"
-              audioBuffer={inputAudioBuffer}
-            />
-            <FourierTransform 
-              label="Fourier Transform - Audiogram Scale"
-              scaleType="audiogram"
               audioBuffer={inputAudioBuffer}
             />
           </div>
 
-          {uploadedFile && (
+          {isLoadingFFT ? (
+            <div className="loading-indicator" style={{ padding: '20px', textAlign: 'center' }}>
+              <p>Loading FFT analysis...</p>
+            </div>
+          ) : (
+            <div className="fourier-grid">
+              <FourierTransform 
+                label="Fourier Transform - Linear Scale"
+                scaleType="linear"
+                backendFFTData={fftData}
+              />
+              <FourierTransform 
+                label="Fourier Transform - Audiogram Scale"
+                scaleType="audiogram"
+                backendFFTData={fftData}
+              />
+            </div>
+          )}
+
+          {uploadedFile && !isLoadingFFT && (
             <div className="separation-controls">
               <button 
                 onClick={handleSeparate} 
                 className="separate-btn"
+                disabled={isLoadingSeparation}
               >
                 <Scissors size={20} />
-                Separate Audio into {separationType === 'music' ? 'Instruments' : 'Voices'}
+                {isLoadingSeparation ? 'Separating...' : `Separate Audio into ${separationType === 'music' ? 'Instruments' : 'Voices'}`}
               </button>
             </div>
           )}
@@ -290,6 +464,19 @@ export const AudioSeparation = ({ uploadedFile, currentMode, showSpectrograms })
     <div className="audio-separation-container separated">
       <div className="separation-header">
         <h2>Separated Tracks - {separationType === 'music' ? 'Music Mode' : 'Speech Mode'}</h2>
+        {isProcessingGain && (
+          <div style={{ 
+            display: 'inline-block', 
+            marginLeft: '15px', 
+            padding: '5px 10px', 
+            background: '#3b82f6', 
+            borderRadius: '4px',
+            fontSize: '12px',
+            color: 'white'
+          }}>
+            ⚡ Processing gain changes...
+          </div>
+        )}
       </div>
 
       {/* Individual Tracks Section - 2 columns grid */}
@@ -303,8 +490,6 @@ export const AudioSeparation = ({ uploadedFile, currentMode, showSpectrograms })
               onGainChange={handleGainChange}
               onMuteToggle={handleMuteToggle}
               onSoloToggle={handleSoloToggle}
-              playbackState={playbackState}
-              onPlaybackStateChange={setPlaybackState}
             />
           ))}
         </div>
@@ -320,6 +505,7 @@ export const AudioSeparation = ({ uploadedFile, currentMode, showSpectrograms })
               variant="input"
               playbackState={playbackState}
               onPlaybackStateChange={setPlaybackState}
+              audioBuffer={inputAudioBuffer}
             />
           </div>
           <div className="io-playback-half">
@@ -328,6 +514,8 @@ export const AudioSeparation = ({ uploadedFile, currentMode, showSpectrograms })
               variant="output"
               playbackState={playbackState}
               onPlaybackStateChange={setPlaybackState}
+              audioBuffer={outputAudioBuffer}
+              inputAudioBuffer={inputAudioBuffer}
             />
           </div>
         </div>
@@ -336,26 +524,46 @@ export const AudioSeparation = ({ uploadedFile, currentMode, showSpectrograms })
       {/* FFT Comparison Section */}
       <div className="fft-comparison-section">
         <h3>Fourier Transform Comparison</h3>
-        <div className="fft-row">
-          <div className="fft-item">
-            <FourierTransform 
-              label="FFT - Linear"
-              scaleType="linear"
-              audioBuffer={inputAudioBuffer}
-              compareBuffer={outputAudioBuffer}
-              comparison={true}
-            />
+        {isLoadingFFT ? (
+          <div className="loading-indicator" style={{ padding: '20px', textAlign: 'center' }}>
+            <p>Loading FFT analysis...</p>
           </div>
-          <div className="fft-item">
-            <FourierTransform 
-              label="FFT - Audiogram"
-              scaleType="audiogram"
-              audioBuffer={inputAudioBuffer}
-              compareBuffer={outputAudioBuffer}
-              comparison={true}
-            />
-          </div>
-        </div>
+        ) : (
+          <>
+            <div className="fft-row">
+              <div className="fft-item">
+                <FourierTransform 
+                  label="Input FFT - Linear"
+                  scaleType="linear"
+                  backendFFTData={inputFftData}
+                />
+              </div>
+              <div className="fft-item">
+                <FourierTransform 
+                  label="Output FFT - Linear"
+                  scaleType="linear"
+                  backendFFTData={outputFftData}
+                />
+              </div>
+            </div>
+            <div className="fft-row">
+              <div className="fft-item">
+                <FourierTransform 
+                  label="Input FFT - Audiogram"
+                  scaleType="audiogram"
+                  backendFFTData={inputFftData}
+                />
+              </div>
+              <div className="fft-item">
+                <FourierTransform 
+                  label="Output FFT - Audiogram"
+                  scaleType="audiogram"
+                  backendFFTData={outputFftData}
+                />
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Spectrograms - Matching Normal EQ Design */}

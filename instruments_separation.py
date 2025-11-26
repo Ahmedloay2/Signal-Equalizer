@@ -122,7 +122,7 @@ class InstrumentSeparator:
         return True
     
     def separate_stems(self):
-        """Run Demucs AI separation with GPU acceleration if available"""
+        """Run Demucs AI separation with GPU acceleration if available using Python API"""
         print("\n" + "="*60)
         print("🤖 RUNNING DEMUCS AI SEPARATION")
         print("="*60)
@@ -134,32 +134,122 @@ class InstrumentSeparator:
         demucs_output = self.run_dir / "demucs_output"
         demucs_output.mkdir(parents=True, exist_ok=True)
         
-        # Run Demucs using Python API (more reliable than shell command)
+        # Use Demucs Python API directly to avoid PyTorch tensor aliasing bug
         try:
+            from demucs.pretrained import get_model
+            from demucs.apply import apply_model
+            from demucs.audio import AudioFile
+            import torch
+            
+            print("📥 Loading audio file...")
+            # Load audio with proper tensor handling
+            audio_file = AudioFile(str(self.input_audio_path))
+            wav = audio_file.read(seek_time=0, duration=None, streams=0, samplerate=44100, channels=2)
+            
+            # Ensure tensor is contiguous and cloned to avoid aliasing
+            if isinstance(wav, torch.Tensor):
+                wav = wav.clone().contiguous()
+            
+            print(f"✅ Audio loaded: {wav.shape if isinstance(wav, torch.Tensor) else 'N/A'}")
+            
+            print("📥 Loading Demucs model...")
+            device = self.device if TORCH_AVAILABLE and torch.cuda.is_available() and self.device == 'cuda' else 'cpu'
+            model = get_model('htdemucs_6s')
+            model.to(device)
+            model.eval()
+            print(f"✅ Model loaded on {device}")
+            
+            print("🔄 Separating audio...")
+            with torch.no_grad():
+                wav = wav.to(device)
+                # Normalize audio
+                ref = wav.mean(0)
+                wav = wav - ref.mean()
+                wav = wav / wav.std()
+                
+                # Apply model
+                sources = apply_model(model, wav[None], device=device, shifts=1, split=True, overlap=0.25, progress=True)[0]
+                sources = sources * wav.std() + ref.mean()
+            
+            print("✅ Separation complete!")
+            
+            # Save separated sources
+            htdemucs_dir = demucs_output / 'htdemucs_6s' / self.input_audio_path.stem
+            htdemucs_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Demucs htdemucs_6s outputs: drums, bass, other, vocals (4 sources, not 6)
+            # Only save tracks that have signal (RMS > threshold)
+            source_names = ['drums', 'bass', 'other', 'vocals']
+            saved_count = 0
+            for i, (name, source) in enumerate(zip(source_names, sources)):
+                audio_np = source.cpu().numpy()
+                # Check if track has signal (RMS threshold)
+                rms = np.sqrt(np.mean(audio_np ** 2))
+                if rms > 0.001:  # Threshold for "has signal"
+                    output_path = htdemucs_dir / f"{name}.wav"
+                    sf.write(str(output_path), audio_np.T, self.SAMPLE_RATE)
+                    print(f"✅ Saved: {name}.wav (RMS: {rms:.4f})")
+                    saved_count += 1
+                else:
+                    print(f"⏭️  Skipped: {name} (no signal, RMS: {rms:.4f})")
+            
+            # For 6-stem model compatibility, check guitar and piano from 'other'
+            # Note: htdemucs_6s doesn't actually separate these, so we skip them
+            print(f"✅ Saved {saved_count} tracks with signal")
+            
+            self.separated_dir = htdemucs_dir
+            print(f"\n✅ SEPARATION COMPLETE!")
+            print(f"📂 Output directory: {self.separated_dir}")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Python API separation failed: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            print("🔄 Falling back to command-line interface...")
+            
+            # Fallback to subprocess method
             import subprocess
-            cmd = [
-                'demucs',
-                '--name', 'htdemucs_6s',
-                str(self.input_audio_path),
-                '-o', str(demucs_output)
-            ]
+            import shutil
             
-            # Add GPU device if available
-            if self.device == 'cuda':
-                cmd.extend(['--device', 'cuda'])
-                print("🚀 GPU Acceleration: ENABLED")
-            else:
-                cmd.extend(['--device', 'cpu'])
-                # Use multiple CPU cores for faster processing
-                cpu_jobs = max(1, multiprocessing.cpu_count() // 2)
-                cmd.extend(['--jobs', str(cpu_jobs)])
-                print(f"🔢 CPU Parallel Jobs: {cpu_jobs}")
+            demucs_path = shutil.which('demucs')
+            if not demucs_path:
+                raise Exception("Demucs is not installed or not in PATH. Please install: pip install demucs")
             
-            print(f"🔄 Running: {' '.join(cmd)}")
+            print(f"✅ Demucs found: {demucs_path}")
             
-            # Try with the specified device (CUDA or CPU)
+            # Subprocess fallback (old method)
             try:
-                result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                cmd = [
+                    'demucs',
+                    '--name', 'htdemucs_6s',
+                    str(self.input_audio_path),
+                    '-o', str(demucs_output),
+                    '--no-split'  # Prevent tensor memory aliasing error in PyTorch 2.x
+                ]
+                
+                # Add GPU device if available
+                if self.device == 'cuda':
+                    cmd.extend(['--device', 'cuda'])
+                    print("🚀 GPU Acceleration: ENABLED")
+                else:
+                    cmd.extend(['--device', 'cpu'])
+                    # Jobs parameter is ignored with --no-split, but add for compatibility
+                    cpu_jobs = 1  # Must be 1 with --no-split
+                    cmd.extend(['--jobs', str(cpu_jobs)])
+                    print(f"🔢 CPU Jobs: {cpu_jobs} (no-split mode)")
+                
+                print(f"🔄 Running: {' '.join(cmd)}")
+                print(f"📂 Input file: {self.input_audio_path}")
+                print(f"📂 Output dir: {demucs_output}")
+                
+                # Try with the specified device (CUDA or CPU)
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                # Check if command succeeded
+                if result.returncode != 0:
+                    raise subprocess.CalledProcessError(result.returncode, cmd, result.stdout, result.stderr)
+                    
             except subprocess.CalledProcessError as e:
                 # Check if it's the tensor memory location error on CUDA
                 error_msg = str(e.stderr) if e.stderr else ""
@@ -176,45 +266,52 @@ class InstrumentSeparator:
                         '--name', 'htdemucs_6s',
                         str(self.input_audio_path),
                         '-o', str(demucs_output),
-                        '--device', 'cpu'
+                        '--device', 'cpu',
+                        '--no-split',  # Prevent tensor memory aliasing error
+                        '--jobs', '1'  # Must be 1 with --no-split
                     ]
-                    
-                    # Use multiple CPU cores
-                    cpu_jobs = max(1, multiprocessing.cpu_count() // 2)
-                    cmd_cpu.extend(['--jobs', str(cpu_jobs)])
                     
                     print(f"🔄 Retrying: {' '.join(cmd_cpu)}")
                     try:
-                        result = subprocess.run(cmd_cpu, capture_output=True, text=True, check=True)
+                        result = subprocess.run(cmd_cpu, capture_output=True, text=True)
+                        
+                        # Check if command succeeded
+                        if result.returncode != 0:
+                            raise subprocess.CalledProcessError(result.returncode, cmd_cpu, result.stdout, result.stderr)
+                        
                         print("✅ CPU fallback successful!")
                     except subprocess.CalledProcessError as cpu_error:
                         print(f"\n❌ CPU fallback also failed:")
-                        print(f"   {cpu_error.stderr}")
-                        raise
+                        print(f"   Return code: {cpu_error.returncode}")
+                        print(f"   STDERR: {cpu_error.stderr}")
+                        print(f"   STDOUT: {cpu_error.stdout}")
+                        raise Exception(f"Demucs separation failed: {cpu_error.stderr}")
                 else:
                     # Re-raise if it's a different error or CPU was already used
                     print(f"\n❌ ERROR during separation:")
-                    print(f"   {e.stderr}")
-                    raise
-            
-            # Find the separated directory
-            htdemucs_dir = demucs_output / 'htdemucs_6s'
-            if htdemucs_dir.exists():
-                subdirs = list(htdemucs_dir.iterdir())
-                if subdirs:
-                    self.separated_dir = subdirs[0]
-                    print(f"\n✅ SEPARATION COMPLETE!")
-                    print(f"📂 Output directory: {self.separated_dir}")
-                    return True
-            
-            raise Exception("Could not find separated output directory")
-            
-        except subprocess.CalledProcessError:
-            # Already handled above
-            raise
-        except Exception as e:
-            print(f"\n❌ ERROR: {str(e)}")
-            raise
+                    print(f"   Return code: {e.returncode}")
+                    print(f"   STDERR: {e.stderr}")
+                    print(f"   STDOUT: {e.stdout}")
+                    raise Exception(f"Demucs separation failed: {e.stderr}")
+                
+                # Find the separated directory
+                htdemucs_dir = demucs_output / 'htdemucs_6s'
+                if htdemucs_dir.exists():
+                    subdirs = list(htdemucs_dir.iterdir())
+                    if subdirs:
+                        self.separated_dir = subdirs[0]
+                        print(f"\n✅ SEPARATION COMPLETE!")
+                        print(f"📂 Output directory: {self.separated_dir}")
+                        return True
+                
+                raise Exception("Could not find separated output directory")
+                
+            except subprocess.CalledProcessError:
+                # Already handled above
+                raise
+            except Exception as e:
+                print(f"\n❌ ERROR: {str(e)}")
+                raise
     
     def load_stems(self):
         """Load all separated stems into memory with parallel processing"""

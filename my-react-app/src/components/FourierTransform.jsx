@@ -173,61 +173,148 @@ export const FourierTransform = ({
       ctx.globalAlpha = 0.7;
       ctx.beginPath();
 
-      let inputPointsDrawn = 0;
-      for (let i = 0; i < normInput.length; i++) {
-        let x;
-        if (scaleType === "audiogram") {
-          const freq = inputFreqs[i];
-          if (freq < 125 || freq > 8000) continue;
-          // Proper log scale: log10(freq/125) / log10(8000/125)
-          const logScale = Math.log10(freq / 125) / Math.log10(8000 / 125);
-          x = padding.left + logScale * chartWidth;
-        } else {
-          x = padding.left + (i / normInput.length) * chartWidth;
-        }
+      // For audiogram, use standard audiometric frequencies
+      const audiogramFreqs = [125, 250, 500, 1000, 2000, 4000, 8000];
+      
+      if (scaleType === "audiogram") {
+        // Draw input spectrum with discrete points at audiometric frequencies
+        ctx.strokeStyle = '#22c55e';
+        ctx.fillStyle = '#22c55e';
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = 0.7;
         
-        const value = Math.min(1, Math.max(0, normInput[i]));
-        const y = padding.top + chartHeight - (value * chartHeight * 0.8);
-        
-        if (inputPointsDrawn === 0) {
-          ctx.moveTo(x, y);
-        } else {
-          ctx.lineTo(x, y);
-        }
-        inputPointsDrawn++;
-      }
-      ctx.stroke();
+        audiogramFreqs.forEach((targetFreq, idx) => {
+          // Find closest frequency bin
+          let closestIdx = 0;
+          let minDiff = Math.abs(inputFreqs[0] - targetFreq);
+          for (let i = 1; i < inputFreqs.length; i++) {
+            const diff = Math.abs(inputFreqs[i] - targetFreq);
+            if (diff < minDiff) {
+              minDiff = diff;
+              closestIdx = i;
+            }
+          }
+          
+          const x = padding.left + (idx / (audiogramFreqs.length - 1)) * chartWidth;
+          const value = Math.min(1, Math.max(0, normInput[closestIdx]));
+          const y = padding.top + chartHeight - (value * chartHeight * 0.8);
+          
+          // Draw point
+          ctx.beginPath();
+          ctx.arc(x, y, 4, 0, Math.PI * 2);
+          ctx.fill();
+          
+          // Draw line to next point
+          if (idx > 0) {
+            const prevX = padding.left + ((idx - 1) / (audiogramFreqs.length - 1)) * chartWidth;
+            const prevClosestIdx = audiogramFreqs[idx - 1];
+            let prevIdx = 0;
+            let prevMinDiff = Math.abs(inputFreqs[0] - prevClosestIdx);
+            for (let i = 1; i < inputFreqs.length; i++) {
+              const diff = Math.abs(inputFreqs[i] - prevClosestIdx);
+              if (diff < prevMinDiff) {
+                prevMinDiff = diff;
+                prevIdx = i;
+              }
+            }
+            const prevValue = Math.min(1, Math.max(0, normInput[prevIdx]));
+            const prevY = padding.top + chartHeight - (prevValue * chartHeight * 0.8);
+            
+            ctx.beginPath();
+            ctx.moveTo(prevX, prevY);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+          }
+        });
 
-      // Draw output spectrum (processed - after equalizer)
-      ctx.strokeStyle = '#a855f7';
-      ctx.lineWidth = 2.5;
-      ctx.globalAlpha = 0.9;
-      ctx.beginPath();
+        // Draw output spectrum with discrete points
+        ctx.strokeStyle = '#a855f7';
+        ctx.fillStyle = '#a855f7';
+        ctx.lineWidth = 2.5;
+        ctx.globalAlpha = 0.9;
+        
+        audiogramFreqs.forEach((targetFreq, idx) => {
+          // Find closest frequency bin
+          let closestIdx = 0;
+          let minDiff = Math.abs(outputFreqs[0] - targetFreq);
+          for (let i = 1; i < outputFreqs.length; i++) {
+            const diff = Math.abs(outputFreqs[i] - targetFreq);
+            if (diff < minDiff) {
+              minDiff = diff;
+              closestIdx = i;
+            }
+          }
+          
+          const x = padding.left + (idx / (audiogramFreqs.length - 1)) * chartWidth;
+          const value = Math.min(1, Math.max(0, normOutput[closestIdx]));
+          const y = padding.top + chartHeight - (value * chartHeight * 0.8);
+          
+          // Draw point
+          ctx.beginPath();
+          ctx.arc(x, y, 5, 0, Math.PI * 2);
+          ctx.fill();
+          
+          // Draw line to next point
+          if (idx > 0) {
+            const prevX = padding.left + ((idx - 1) / (audiogramFreqs.length - 1)) * chartWidth;
+            const prevClosestIdx = audiogramFreqs[idx - 1];
+            let prevIdx = 0;
+            let prevMinDiff = Math.abs(outputFreqs[0] - prevClosestIdx);
+            for (let i = 1; i < outputFreqs.length; i++) {
+              const diff = Math.abs(outputFreqs[i] - prevClosestIdx);
+              if (diff < prevMinDiff) {
+                prevMinDiff = diff;
+                prevIdx = i;
+              }
+            }
+            const prevValue = Math.min(1, Math.max(0, normOutput[prevIdx]));
+            const prevY = padding.top + chartHeight - (prevValue * chartHeight * 0.8);
+            
+            ctx.beginPath();
+            ctx.moveTo(prevX, prevY);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+          }
+        });
+      } else {
+        // Linear scale - draw continuous lines
+        ctx.strokeStyle = '#22c55e';
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = 0.7;
+        ctx.beginPath();
 
-      let outputPointsDrawn = 0;
-      for (let i = 0; i < normOutput.length; i++) {
-        let x;
-        if (scaleType === "audiogram") {
-          const freq = outputFreqs[i];
-          if (freq < 125 || freq > 8000) continue;
-          // Proper log scale: log10(freq/125) / log10(8000/125)
-          const logScale = Math.log10(freq / 125) / Math.log10(8000 / 125);
-          x = padding.left + logScale * chartWidth;
-        } else {
-          x = padding.left + (i / normOutput.length) * chartWidth;
+        for (let i = 0; i < normInput.length; i++) {
+          const x = padding.left + (i / normInput.length) * chartWidth;
+          const value = Math.min(1, Math.max(0, normInput[i]));
+          const y = padding.top + chartHeight - (value * chartHeight * 0.8);
+          
+          if (i === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
         }
-        
-        const value = Math.min(1, Math.max(0, normOutput[i]));
-        const y = padding.top + chartHeight - (value * chartHeight * 0.8);
-        
-        if (outputPointsDrawn === 0) {
-          ctx.moveTo(x, y);
-        } else {
-          ctx.lineTo(x, y);
+        ctx.stroke();
+
+        // Draw output spectrum
+        ctx.strokeStyle = '#a855f7';
+        ctx.lineWidth = 2.5;
+        ctx.globalAlpha = 0.9;
+        ctx.beginPath();
+
+        for (let i = 0; i < normOutput.length; i++) {
+          const x = padding.left + (i / normOutput.length) * chartWidth;
+          const value = Math.min(1, Math.max(0, normOutput[i]));
+          const y = padding.top + chartHeight - (value * chartHeight * 0.8);
+          
+          if (i === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
         }
-        outputPointsDrawn++;
+        ctx.stroke();
       }
-      ctx.stroke();
       ctx.globalAlpha = 1.0;
 
       // Add legend
@@ -235,12 +322,25 @@ export const FourierTransform = ({
       ctx.fillRect(padding.left, 5, 15, 8);
       ctx.fillStyle = '#e4e4e7';
       ctx.font = '11px sans-serif';
-      ctx.fillText('Original', padding.left + 20, 12);
+      ctx.fillText('Input', padding.left + 20, 12);
       
       ctx.fillStyle = '#a855f7';
-      ctx.fillRect(padding.left + 90, 5, 15, 8);
+      ctx.fillRect(padding.left + 70, 5, 15, 8);
       ctx.fillStyle = '#e4e4e7';
-      ctx.fillText('Equalized', padding.left + 110, 12);
+      ctx.fillText('Output', padding.left + 90, 12);
+      
+      // Draw frequency labels for audiogram
+      if (scaleType === "audiogram") {
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        audiogramFreqs.forEach((freq, idx) => {
+          const x = padding.left + (idx / (audiogramFreqs.length - 1)) * chartWidth;
+          const label = freq >= 1000 ? `${freq/1000}k` : freq.toString();
+          ctx.fillText(label, x, height - 10);
+        });
+        ctx.textAlign = 'left';
+      }
     } else {
       // Single spectrum showing PROCESSED audio only
       const normOutput = outputMags.map(m => m / maxMag);

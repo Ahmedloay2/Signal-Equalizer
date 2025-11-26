@@ -1,0 +1,36 @@
+{
+  "success": true,
+  "timestamp": "20251127_002859",
+  "input_audio_file": "C:\\Users\\ahmed\\AppData\\Local\\Temp\\dsp_task3_uploads_2i7sprxy\\1764196139_overlapping_instruments_1.wav",
+  "output_directory": "D:\\training\\web\\test-front\\output\\run_20251127_002859",
+  "mixed_audio_file": "D:\\training\\web\\test-front\\output\\run_20251127_002859\\mixed_output_20251127_002859.wav",
+  "separated_stems_full": {
+    "drums": "D:\\training\\web\\test-front\\output\\run_20251127_002859\\demucs_output\\htdemucs_6s\\1764196139_overlapping_instruments_1\\drums.wav",
+    "bass": "D:\\training\\web\\test-front\\output\\run_20251127_002859\\demucs_output\\htdemucs_6s\\1764196139_overlapping_instruments_1\\bass.wav",
+    "vocals": "D:\\training\\web\\test-front\\output\\run_20251127_002859\\demucs_output\\htdemucs_6s\\1764196139_overlapping_instruments_1\\vocals.wav",
+    "guitar": "D:\\training\\web\\test-front\\output\\run_20251127_002859\\demucs_output\\htdemucs_6s\\1764196139_overlapping_instruments_1\\guitar.wav",
+    "piano": "D:\\training\\web\\test-front\\output\\run_20251127_002859\\demucs_output\\htdemucs_6s\\1764196139_overlapping_instruments_1\\piano.wav",
+    "other": "D:\\training\\web\\test-front\\output\\run_20251127_002859\\demucs_output\\htdemucs_6s\\1764196139_overlapping_instruments_1\\other.wav"
+  },
+  "separated_stems_trimmed": {
+    "drums": "D:\\training\\web\\test-front\\output\\run_20251127_002859\\trimmed_stems\\drums_trimmed.wav",
+    "bass": "D:\\training\\web\\test-front\\output\\run_20251127_002859\\trimmed_stems\\bass_trimmed.wav",
+    "vocals": "D:\\training\\web\\test-front\\output\\run_20251127_002859\\trimmed_stems\\vocals_trimmed.wav",
+    "guitar": "D:\\training\\web\\test-front\\output\\run_20251127_002859\\trimmed_stems\\guitar_trimmed.wav",
+    "piano": "D:\\training\\web\\test-front\\output\\run_20251127_002859\\trimmed_stems\\piano_trimmed.wav",
+    "other": "D:\\training\\web\\test-front\\output\\run_20251127_002859\\trimmed_stems\\other_trimmed.wav"
+  },
+  "spectrogram_image": null,
+  "slider_settings": {
+    "drums": 1.0,
+    "bass": 1.0,
+    "vocals": 1.0,
+    "guitar": 1.0,
+    "piano": 1.0,
+    "other": 1.0
+  },
+  "sample_rate": 44100,
+  "duration_seconds": 5.0,
+  "num_stems_separated": 6,
+  "message": "Successfully separated 6 stems and created custom mix"
+}

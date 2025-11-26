@@ -6,11 +6,16 @@ export const SeparatedTrackControl = ({
   track,
   onGainChange,
   onMuteToggle,
-  onSoloToggle,
-  playbackState,
-  onPlaybackStateChange
+  onSoloToggle
 }) => {
   const [gainValue, setGainValue] = useState(track.gain);
+  const [playbackState, setPlaybackState] = useState({
+    isPlaying: false,
+    isPaused: false,
+    time: 0,
+    speed: 1,
+    zoom: 1
+  });
 
   const handleGainChange = (e) => {
     const newGain = parseFloat(e.target.value);
@@ -45,7 +50,8 @@ export const SeparatedTrackControl = ({
           label=""
           variant={track.muted ? "muted" : "input"}
           playbackState={playbackState}
-          onPlaybackStateChange={onPlaybackStateChange}
+          onPlaybackStateChange={setPlaybackState}
+          audioBuffer={track.audioBuffer}
         />
       </div>
       

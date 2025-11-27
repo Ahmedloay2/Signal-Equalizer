@@ -168,15 +168,18 @@ export const Spectrogram = ({ label, audioBuffer = null, spectrogramData: extern
     ctx.lineTo(width - 20, height - labelPadding);
     ctx.stroke();
     
-    // Frequency axis ticks (Y-axis) - use actual frequency data
+    // Frequency axis ticks (Y-axis) - use actual frequency data starting from 0
     ctx.fillStyle = '#94a3b8';
     ctx.font = "11px sans-serif";
     ctx.textAlign = "right";
     ctx.textBaseline = 'middle';
+    const minFreq = 0; // Always start from 0 Hz
     const maxFreq = spectrogramData.frequencies[spectrogramData.frequencies.length - 1] / 1000; // Convert to kHz
+    const freqRange = maxFreq - minFreq;
+    
     for (let i = 0; i <= 4; i++) {
       const y = labelPadding + ((height - labelPadding * 2) / 4) * (4 - i);
-      const freq = (i / 4) * maxFreq;
+      const freq = minFreq + (i / 4) * freqRange;
       ctx.fillText(`${freq.toFixed(1)}`, labelPadding - 5, y);
     }
 

@@ -11,7 +11,6 @@ from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
 import threading
 import io
-from scipy.io import wavfile
 
 import numpy as np
 import soundfile as sf
@@ -372,18 +371,24 @@ def separate_voices():
         print(f"✅ Voice separation complete!")
         
         # Convert absolute paths to relative paths for download endpoint
+        # Only include files that actually exist (signal detection)
         files = []
         if 'separated_sources' in result:
             # Resolve OUTPUT_FOLDER to absolute path
             output_folder_abs = OUTPUT_FOLDER.resolve()
             for abs_path in result['separated_sources']:
-                # Convert absolute path to relative path from OUTPUT_FOLDER
+                # Check if file actually exists (signal detection may have skipped it)
                 abs_path_obj = Path(abs_path)
-                rel_path = abs_path_obj.relative_to(output_folder_abs)
-                files.append(str(rel_path).replace('\\', '/'))
+                if abs_path_obj.exists():
+                    # Convert absolute path to relative path from OUTPUT_FOLDER
+                    rel_path = abs_path_obj.relative_to(output_folder_abs)
+                    files.append(str(rel_path).replace('\\', '/'))
+                else:
+                    print(f"⏭️  Skipping voice - file doesn't exist (no signal)")
         
         result['session_id'] = session_id
         result['files'] = files  # Add 'files' key for frontend compatibility
+        print(f"📤 Returning {len(files)} voice files to frontend")
         return jsonify(result)
         
     except Exception as e:
@@ -680,13 +685,73 @@ def upload_wav_and_fft():
         return jsonify({"error": "No selected file"}), 400
 
     if file:
+        temp_file_path = None
         try:
-            # Read the WAV file from the in-memory file object
-            samplerate, data = wavfile.read(io.BytesIO(file.read()))
+            # Read file data into memory first
+            file_data = file.read()
+            
+            # Debug file information
+            print(f"\n=== AUDIO FILE DEBUG ===")
+            print(f"Filename: {file.filename}")
+            print(f"Content type: {file.content_type}")
+            print(f"File size: {len(file_data)} bytes")
+            print(f"First 16 bytes (hex): {file_data[:16].hex()}")
+            print(f"First 4 bytes (ASCII): {file_data[:4]}")
+            
+            # Try multiple methods to read the audio file
+            data = None
+            samplerate = None
+            
+            # Method 1: Try soundfile with BytesIO
+            try:
+                data, samplerate = sf.read(io.BytesIO(file_data))
+                print(f"✅ Successfully read audio using soundfile (BytesIO)")
+            except Exception as e1:
+                print(f"⚠️  Soundfile BytesIO failed: {str(e1)}")
+                
+                # Method 2: Try saving to temp file and reading
+                try:
+                    temp_file_path = os.path.join(tempfile.gettempdir(), f"upload_{int(time.time())}_{secure_filename(file.filename)}")
+                    with open(temp_file_path, 'wb') as f:
+                        f.write(file_data)
+                    
+                    data, samplerate = sf.read(temp_file_path)
+                    print(f"✅ Successfully read audio using soundfile (temp file)")
+                    
+                    # Clean up temp file immediately
+                    try:
+                        os.remove(temp_file_path)
+                        temp_file_path = None
+                    except:
+                        pass
+                        
+                except Exception as e2:
+                    print(f"⚠️  Soundfile temp file failed: {str(e2)}")
+                    
+                    # Method 3: Try scipy wavfile as last resort
+                    try:
+                        from scipy.io import wavfile
+                        samplerate, data = wavfile.read(io.BytesIO(file_data))
+                        print(f"✅ Successfully read audio using scipy wavfile")
+                    except Exception as e3:
+                        print(f"❌ All methods failed:")
+                        print(f"   - Soundfile BytesIO: {str(e1)}")
+                        print(f"   - Soundfile temp file: {str(e2)}")
+                        print(f"   - Scipy wavfile: {str(e3)}")
+                        print(f"File header (first 16 bytes): {file_data[:16].hex()}")
+                        
+                        # Check if it's actually a WAV file
+                        if file_data[:4] != b'RIFF':
+                            raise Exception(f"File is not a valid WAV file. Header starts with '{file_data[:4]}' instead of 'RIFF'. The file may be in a different format or corrupted.")
+                        else:
+                            raise Exception(f"Could not read WAV file. All reading methods failed. The file format may be unsupported or the file may be corrupted. Please try converting the file using a different audio tool.")
+            
+            if data is None or samplerate is None:
+                raise Exception("Failed to read audio data")
 
-            # If stereo, take only one channel
+            # If stereo, take only one channel (average the channels)
             if data.ndim > 1:
-                data = data[:, 0]
+                data = np.mean(data, axis=1)
 
             # Ensure data is float32 as expected by FFT class
             if data.dtype != np.float32:
@@ -950,6 +1015,12 @@ def upload_wav_and_fft():
             return jsonify(response)
 
         except Exception as e:
+            # Clean up temp file if it exists
+            if temp_file_path and os.path.exists(temp_file_path):
+                try:
+                    os.remove(temp_file_path)
+                except:
+                    pass
             return jsonify({"error": f"Processing failed: {str(e)}"}), 500
 
     return jsonify({"error": "An unexpected error occurred"}), 500

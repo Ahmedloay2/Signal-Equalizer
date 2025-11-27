@@ -235,14 +235,21 @@ class VoiceSeparator:
                 'sample_rate': self.sample_rate
             }
             
-            # Save individual sources
+            # Save individual sources (only those with signal)
             for i, source in enumerate(sources):
                 source_name = f"voice_{i+1}"
-                output_path = session_dir / f"{source_name}.wav"
                 
                 # Apply gain if specified
                 gain = gains.get(i, 1.0)
                 source_audio = source.numpy() * gain
+                
+                # Check if source has signal (RMS threshold)
+                rms = np.sqrt(np.mean(source_audio ** 2))
+                if rms < 0.001:  # Threshold for "has signal"
+                    print(f"   ⏭️  Skipped: {source_name} (no signal, RMS: {rms:.4f})")
+                    continue
+                
+                output_path = session_dir / f"{source_name}.wav"
                 
                 # Ensure correct shape for soundfile (samples, channels)
                 if source_audio.ndim == 1:
@@ -272,7 +279,7 @@ class VoiceSeparator:
                     'size_mb': round(file_size, 2)
                 })
                 
-                print(f"   ✓ {source_name}.wav (gain: {gain:.2f}, size: {file_size:.2f}MB)")
+                print(f"   ✅ Saved: {source_name}.wav (gain: {gain:.2f}, RMS: {rms:.4f}, size: {file_size:.2f}MB)")
             
             # Save mixture with gains applied
             if len(sources) > 0:
@@ -309,10 +316,16 @@ class VoiceSeparator:
                 
                 print(f"   ✓ mixed.wav (size: {mixed_size:.2f}MB)")
             
+            # Add separated_sources list with absolute paths for backend compatibility
+            results['separated_sources'] = []
+            for source_info in results['sources']:
+                abs_path = session_dir / f"{source_info['name']}.wav"
+                results['separated_sources'].append(str(abs_path.absolute()))
+            
             if progress_callback:
                 progress_callback('complete', 1.0, 'Voice separation complete!')
             
-            print(f"✅ All files saved to {session_dir}")
+            print(f"✅ Saved {len(results['sources'])} voices with signal to {session_dir}")
             
             return results
             

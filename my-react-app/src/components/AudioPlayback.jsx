@@ -38,7 +38,14 @@ export const AudioPlayback = ({ label, variant, playbackState, onPlaybackStateCh
         filteredData[i] = sum / blockSize;
       }
       
-      // For output signal, normalize to input signal's scale for proper comparison
+      // Calculate signal max
+      let signalMax = 0;
+      for (let i = 0; i < rawData.length; i++) {
+        const val = Math.abs(rawData[i]);
+        if (val > signalMax) signalMax = val;
+      }
+      
+      // For output signal, use the same scale as input for direct comparison
       if (variant === 'output' && inputAudioBuffer) {
         const inputData = inputAudioBuffer.getChannelData(0);
         let inputMax = 0;
@@ -47,21 +54,21 @@ export const AudioPlayback = ({ label, variant, playbackState, onPlaybackStateCh
           if (val > inputMax) inputMax = val;
         }
         
-        let outputMax = 0;
-        for (let i = 0; i < rawData.length; i++) {
-          const val = Math.abs(rawData[i]);
-          if (val > outputMax) outputMax = val;
-        }
-        
-        // Calculate scale factor to match input amplitude
-        if (outputMax > 0 && inputMax > 0) {
-          normalizationScale.current = inputMax / outputMax;
-          console.log(`AudioPlayback (output): Normalizing to input scale - inputMax: ${inputMax.toFixed(4)}, outputMax: ${outputMax.toFixed(4)}, scale: ${normalizationScale.current.toFixed(4)}`);
+        // Use the same scale as input (0.8 / inputMax)
+        if (inputMax > 0) {
+          normalizationScale.current = 0.8 / inputMax;
+          console.log(`AudioPlayback (output): Using input scale - inputMax: ${inputMax.toFixed(4)}, outputMax: ${signalMax.toFixed(4)}, scale: ${normalizationScale.current.toFixed(4)}`);
         } else {
           normalizationScale.current = 1.0;
         }
       } else {
-        normalizationScale.current = 1.0;
+        // For input or standalone signals, normalize to own max
+        if (signalMax > 0) {
+          // Normalize to use 80% of available space (leaves headroom)
+          normalizationScale.current = 0.8 / signalMax;
+        } else {
+          normalizationScale.current = 1.0;
+        }
       }
       
       waveformData.current = filteredData;
@@ -127,7 +134,8 @@ export const AudioPlayback = ({ label, variant, playbackState, onPlaybackStateCh
       if (sampleIndex >= data.length) break;
       
       const sample = data[sampleIndex] * normalizationScale.current;
-      const y = height / 2 - (sample * height * 0.4);
+      // Use 90% of height for better visualization (leave 10% headroom)
+      const y = height / 2 - (sample * height * 0.45);
       
       if (x === 0) {
         ctx.moveTo(x, y);

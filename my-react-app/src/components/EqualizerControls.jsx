@@ -3,30 +3,27 @@ import React, { useState, useEffect } from "react";
 const getSliderLabels = (mode, subMode) => {
   if (mode === "music") {
     return [
-      { label: "Drums", range: "60-200Hz" },
-      { label: "Bass", range: "80-250Hz" },
-      { label: "Guitar", range: "200-800Hz" },
-      { label: "Piano", range: "250-4kHz" },
-      { label: "Vocals", range: "300-3.5kHz" },
-      { label: "Synth", range: "500-8kHz" }
+      { label: "Drums", range: "50-172Hz" },
+      { label: "Bass", range: "41-392Hz" },
+      { label: "Flute", range: "120-561Hz" },
+      { label: "Cello", range: "120-202Hz" },
+      { label: "Violing", range: "200-1000Hz" },
     ];
   } else if (mode === "animal") {
     return [
-      { label: "Dog", range: "500-1kHz" },
-      { label: "Cat", range: "600-1.5kHz" },
-      { label: "Bird", range: "1-8kHz" },
-      { label: "Whale", range: "20-200Hz" },
-      { label: "Elephant", range: "15-100Hz" },
-      { label: "Wolf", range: "400-800Hz" }
+      { label: "Dog", range: "300-5000Hz" },
+      { label: "Tiger", range: "0-300Hz" },
+      { label: "Bird", range: "2.9-9kHz" },
+      { label: "Elephant", range: "150-1000Hz" }
     ];
   } else if (mode === "human") {
     return [
-      { label: "Male 1", range: "85-180Hz" },
-      { label: "Female 1", range: "165-255Hz" },
-      { label: "Child", range: "250-400Hz" },
-      { label: "Male 2", range: "85-180Hz" },
-      { label: "Female 2", range: "165-255Hz" },
-      { label: "Elder", range: "80-200Hz" }
+      { label: "Male ", range: "0-586Hz" },
+      { label: "Female ", range: "195-500Hz" },
+      { label: "Child Female", range: "345-700Hz" },
+      { label: "Chile Male", range: "0-125Hz" },
+      { label: "Speech Clarity", range: "2-4KHz" },
+      { label: "Sibilance", range: "4-8KHz" }
     ];
   }
   return [];
@@ -124,36 +121,33 @@ export const EqualizerControls = ({
             
             if (mode === "music") {
               const ranges = [
-                [60, 200],    // Drums
-                [80, 250],    // Bass
-                [200, 800],   // Guitar
-                [250, 4000],  // Piano
-                [300, 3500],  // Vocals
-                [500, 8000]   // Synth
+                [50, 172],    // Drums
+                [41, 392],    // Bass
+                [300, 561],   // Flute
+                [120, 202],  // cello
+                [200, 1000],  // Violin
               ];
               if (idx < ranges.length) {
                 [low, high] = ranges[idx];
               }
             } else if (mode === "animal") {
               const ranges = [
-                [500, 1000],   // Dog
-                [600, 1500],   // Cat
-                [1000, 8000],  // Bird
-                [20, 200],     // Whale
-                [15, 100],     // Elephant
-                [400, 800]     // Wolf
+                [300, 5000],   // Dog
+                [2900, 9000],  // Bird
+                [0, 300],     //Tiger
+                [150, 1000],     // Elephant
               ];
               if (idx < ranges.length) {
                 [low, high] = ranges[idx];
               }
             } else if (mode === "human") {
               const ranges = [
-                [85, 180],    // Male 1
-                [165, 255],   // Female 1
-                [250, 400],   // Child
-                [85, 180],    // Male 2
-                [165, 255],   // Female 2
-                [80, 200]     // Elder
+                [0, 586],    // Male 1
+                [195, 500],   // Female 1
+                [345, 700],   // Child Female
+                [0, 125],    // Child Male
+                [2000, 4000],   // Speech Clarity
+                [4000, 8000]     // Sibilance
               ];
               if (idx < ranges.length) {
                 [low, high] = ranges[idx];

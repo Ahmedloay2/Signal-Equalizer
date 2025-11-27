@@ -26,11 +26,13 @@ const convertBackendFFTToSpectrum = (fftReal, fftImag, sampleRate, fftSize) => {
 export const FourierTransform = ({ 
   label = "Fourier Transform",
   scaleType = "linear",
-  backendFFTData = null  // Use backend FFT data instead of audio buffers
+  backendFFTData = null,  // Use backend FFT data instead of audio buffers
+  mode = "generic"  // Mode: generic, music, animal, human
 }) => {
   const canvasRef = useRef(null);
   const [inputFftData, setInputFftData] = useState(null);
   const [outputFftData, setOutputFftData] = useState(null);
+  const [inputMaxMagnitude, setInputMaxMagnitude] = useState(0);
 
   // Process backend FFT data when it changes
   useEffect(() => {
@@ -52,8 +54,18 @@ export const FourierTransform = ({
       if (originalFftReal && originalFftImag) {
         const inputSpectrum = convertBackendFFTToSpectrum(originalFftReal, originalFftImag, sampleRate, fftSize);
         setInputFftData(inputSpectrum);
+        
+        // Calculate max magnitude from input for custom mode scaling
+        let maxMag = 0;
+        for (let i = 0; i < inputSpectrum.magnitudes.length; i++) {
+          if (inputSpectrum.magnitudes[i] > maxMag) maxMag = inputSpectrum.magnitudes[i];
+        }
+        setInputMaxMagnitude(maxMag);
+        console.log(`FourierTransform: Input max magnitude calculated: ${maxMag.toFixed(6)}, mode: ${mode}`);
       } else {
         setInputFftData(null);
+        setInputMaxMagnitude(0);
+        console.log('FourierTransform: No original FFT data available');
       }
       
       // Convert processed FFT (after equalizer)
@@ -142,16 +154,31 @@ export const FourierTransform = ({
     const outputFreqs = outputFftData.frequencies;
     const outputMags = outputFftData.magnitudes;
     
-    // Calculate max magnitude for normalization (iterate to avoid stack overflow)
+    // Calculate max magnitude for normalization
     let maxMag = 0;
+    let outputMaxMag = 0;
+    
+    // Calculate output max for comparison
     for (let i = 0; i < outputMags.length; i++) {
-      if (outputMags[i] > maxMag) maxMag = outputMags[i];
+      if (outputMags[i] > outputMaxMag) outputMaxMag = outputMags[i];
     }
-    if (hasInputData) {
-      const inputMags = inputFftData.magnitudes;
-      for (let i = 0; i < inputMags.length; i++) {
-        if (inputMags[i] > maxMag) maxMag = inputMags[i];
+    
+    // For custom modes (music, animal, human): use input signal's max
+    // For generic mode: use the larger of input/output max
+    if (mode !== 'generic' && inputMaxMagnitude > 0) {
+      // Custom modes: scale based on input signal max (allows output to exceed 1.0 if amplified)
+      maxMag = inputMaxMagnitude;
+      console.log(`FourierTransform (${scaleType}): Custom mode "${mode}" - Using INPUT max: ${maxMag.toFixed(6)}, output max: ${outputMaxMag.toFixed(6)}, ratio: ${(outputMaxMag/maxMag).toFixed(3)}x`);
+    } else {
+      // Generic mode: use traditional max of both signals
+      maxMag = outputMaxMag;
+      if (hasInputData) {
+        const inputMags = inputFftData.magnitudes;
+        for (let i = 0; i < inputMags.length; i++) {
+          if (inputMags[i] > maxMag) maxMag = inputMags[i];
+        }
       }
+      console.log(`FourierTransform (${scaleType}): Generic mode - Using max of both: ${maxMag.toFixed(6)}`);
     }
     
     if (maxMag === 0) {
@@ -278,13 +305,15 @@ export const FourierTransform = ({
         });
       } else {
         // Linear scale - draw continuous lines
+        // For generic mode: ensure full spectrum from 0 Hz to Nyquist frequency
         ctx.strokeStyle = '#22c55e';
         ctx.lineWidth = 2;
         ctx.globalAlpha = 0.7;
         ctx.beginPath();
 
+        // Draw full spectrum including zeros
         for (let i = 0; i < normInput.length; i++) {
-          const x = padding.left + (i / normInput.length) * chartWidth;
+          const x = padding.left + (i / (normInput.length - 1)) * chartWidth;
           const value = Math.min(1, Math.max(0, normInput[i]));
           const y = padding.top + chartHeight - (value * chartHeight * 0.8);
           
@@ -302,8 +331,9 @@ export const FourierTransform = ({
         ctx.globalAlpha = 0.9;
         ctx.beginPath();
 
+        // Draw full spectrum including zeros
         for (let i = 0; i < normOutput.length; i++) {
-          const x = padding.left + (i / normOutput.length) * chartWidth;
+          const x = padding.left + (i / (normOutput.length - 1)) * chartWidth;
           const value = Math.min(1, Math.max(0, normOutput[i]));
           const y = padding.top + chartHeight - (value * chartHeight * 0.8);
           
@@ -396,10 +426,21 @@ export const FourierTransform = ({
         ctx.fillText(freq >= 1000 ? `${freq/1000}k` : `${freq}`, x, height - 8);
       });
     } else {
-      for (let i = 0; i <= 5; i++) {
-        const x = padding.left + (chartWidth / 5) * i;
-        const freq = (i * 4);
-        ctx.fillText(`${freq}k`, x, height - 8);
+      // For custom modes, use actual frequency range from signal data
+      // For generic mode, use 0-20kHz range
+      const maxFreq = outputFftData.frequencies[outputFftData.frequencies.length - 1];
+      const numLabels = 5;
+      
+      for (let i = 0; i <= numLabels; i++) {
+        const x = padding.left + (chartWidth / numLabels) * i;
+        const freq = (i / numLabels) * maxFreq;
+        
+        // Format: Hz if < 1000, kHz if >= 1000
+        if (freq >= 1000) {
+          ctx.fillText(`${(freq/1000).toFixed(1)}k`, x, height - 8);
+        } else {
+          ctx.fillText(`${Math.round(freq)}`, x, height - 8);
+        }
       }
     }
   };
@@ -419,7 +460,7 @@ export const FourierTransform = ({
     window.addEventListener('resize', updateSize);
 
     return () => window.removeEventListener('resize', updateSize);
-  }, [scaleType, inputFftData, outputFftData]);
+  }, [scaleType, inputFftData, outputFftData, mode, inputMaxMagnitude]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', height: '100%', minHeight: 0 }}>

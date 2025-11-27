@@ -90,7 +90,23 @@ function App() {
     setCurrentMode(mode);
     setCurrentSubMode(subMode);
     console.log('Mode changed to:', mode, subMode);
-  }, []);
+    
+    // Reset output to input when changing modes
+    if (inputAudioBuffer) {
+      console.log('Resetting output to input due to mode change');
+      setOutputAudioBuffer(inputAudioBuffer);
+      
+      // Reset FFT data to show unmodified signal
+      if (fftData) {
+        setFftData({
+          ...fftData,
+          fftReal: fftData.originalFftReal || fftData.fftReal,
+          fftImag: fftData.originalFftImag || fftData.fftImag,
+          hasModifications: false
+        });
+      }
+    }
+  }, [inputAudioBuffer, fftData]);
 
   const handleToggleSpectrograms = useCallback(() => {
     setShowSpectrograms(prev => !prev);
@@ -150,7 +166,7 @@ function App() {
             setIsProcessingEqualizer(false);
           }
         })();
-      }, 1000);
+      }, 2000);
     }
   }, [customBands, uploadedAudioFile, isProcessingEqualizer, inputAudioBuffer]);
 
@@ -224,7 +240,23 @@ function App() {
     } catch (e) {
       console.error('Error resetting bands in localStorage:', e);
     }
-  }, []);
+    
+    // Reset output to input when resetting equalizer
+    if (inputAudioBuffer) {
+      console.log('Resetting output to input due to equalizer reset');
+      setOutputAudioBuffer(inputAudioBuffer);
+      
+      // Reset FFT data to show unmodified signal
+      if (fftData) {
+        setFftData({
+          ...fftData,
+          fftReal: fftData.originalFftReal || fftData.fftReal,
+          fftImag: fftData.originalFftImag || fftData.fftImag,
+          hasModifications: false
+        });
+      }
+    }
+  }, [inputAudioBuffer, fftData]);
 
   const handleLoadSettings = useCallback((settings) => {
     if (settings.mode) setCurrentMode(settings.mode);
@@ -345,7 +377,7 @@ function App() {
               fontSize: '1.5rem',
               color: '#fbbf24'
             }}>
-              <div>⏳ Processing audio with backend...</div>
+              <div>⏳ Processing audio...</div>
               <div style={{ fontSize: '1rem', color: '#94a3b8' }}>
                 Computing FFT, generating spectrograms, and processing audio...
               </div>
@@ -387,11 +419,13 @@ function App() {
                   label="Fourier Transform - Linear Scale"
                   scaleType="linear"
                   backendFFTData={fftData}
+                  mode={currentMode}
                 />
                 <FourierTransform 
                   label="Fourier Transform - Audiogram"
                   scaleType="audiogram"
                   backendFFTData={fftData}
+                  mode={currentMode}
                 />
               </div>
             </div>

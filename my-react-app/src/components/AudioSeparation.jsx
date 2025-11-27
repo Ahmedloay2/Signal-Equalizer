@@ -186,14 +186,21 @@ export const AudioSeparation = ({ uploadedFile, currentMode, showSpectrograms, i
   // Auto-update output whenever separated tracks change
   useEffect(() => {
     if (stage === 'separated' && separatedTracks.length > 0 && audioContextRef.current) {
+      console.log('AudioSeparation: Recalculating output buffer from', separatedTracks.length, 'tracks');
+      
       // Simple mixing: combine all non-muted tracks
       const activeTracks = separatedTracks.filter(t => !t.muted);
-      if (activeTracks.length === 0 || !activeTracks[0].audioBuffer) return;
+      if (activeTracks.length === 0 || !activeTracks[0].audioBuffer) {
+        console.warn('AudioSeparation: No active tracks or missing audio buffer');
+        return;
+      }
       
       const ctx = audioContextRef.current;
       const sampleRate = activeTracks[0].audioBuffer.sampleRate;
       const length = activeTracks[0].audioBuffer.length;
       const channels = activeTracks[0].audioBuffer.numberOfChannels;
+      
+      console.log('AudioSeparation: Mixing', activeTracks.length, 'active tracks');
       
       // Create new buffer for mixed output
       const mixedBuffer = ctx.createBuffer(channels, length, sampleRate);
@@ -212,6 +219,7 @@ export const AudioSeparation = ({ uploadedFile, currentMode, showSpectrograms, i
       }
       
       setOutputAudioBuffer(mixedBuffer);
+      console.log('AudioSeparation: Output buffer updated');
     }
   }, [separatedTracks, stage]);
 
@@ -526,7 +534,7 @@ export const AudioSeparation = ({ uploadedFile, currentMode, showSpectrograms, i
         <h3>Fourier Transform Comparison</h3>
         {isLoadingFFT ? (
           <div className="loading-indicator" style={{ padding: '20px', textAlign: 'center' }}>
-            <p>Loading FFT analysis...</p>
+            <p>Loading FT analysis...</p>
           </div>
         ) : (
           <>

@@ -58,11 +58,13 @@ export const EqualizerControls = ({
 
   useEffect(() => {
     if (mode === "generic") {
-      setValues(customBands.map(b => typeof b.gain === 'number' ? b.gain : 1));
+      const newValues = customBands.map(b => typeof b.gain === 'number' ? b.gain : 1);
+      setValues(newValues);
+      console.log('EqualizerControls: Updated values from customBands:', newValues);
     } else {
       setValues(labels.map(() => 1));
     }
-  }, [mode, customBands.length]);
+  }, [mode, customBands]);
 
   const handleReset = () => {
     setValues(labels.map(() => 1));
@@ -84,7 +86,7 @@ export const EqualizerControls = ({
     
     // Debounce: Clear existing timer and start new one
     // This ensures that ANY slider change resets the 1-second countdown
-    // Only after 1 second of NO changes will the API be called
+    // Only after 2 second of NO changes will the API be called
     if (audioFile && onEqualizerChange) {
       // Cancel any pending API call
       if (debounceTimerRef.current) {
@@ -97,7 +99,7 @@ export const EqualizerControls = ({
       // Show processing indicator to let user know changes are pending
       setIsProcessing(true);
       
-      // Start new 1-second countdown
+      // Start new 2-second countdown
       debounceTimerRef.current = setTimeout(async () => {
         console.log('EqualizerControls: 1 second elapsed with no changes - calling API now');
         try {
@@ -171,7 +173,7 @@ export const EqualizerControls = ({
         } finally {
           setIsProcessing(false);
         }
-      }, 1000);
+      }, 2000);
     }
   };
 
@@ -250,7 +252,6 @@ export const EqualizerControls = ({
                   onChange={(e) => handleSliderChange(index, Number(e.target.value))}
                   className="vertical-slider"
                 />
-                <div className="slider-middle-line"></div>
               </div>
               <span className="slider-label">{bandLabel}</span>
               {frequencyRange && <span className="slider-freq-range">{frequencyRange}</span>}

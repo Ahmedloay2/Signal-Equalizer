@@ -258,18 +258,97 @@ function App() {
     }
   }, [inputAudioBuffer, fftData]);
 
-  const handleLoadSettings = useCallback((settings) => {
-    if (settings.mode) setCurrentMode(settings.mode);
-    if (typeof settings.showSpectrograms === 'boolean') setShowSpectrograms(settings.showSpectrograms);
-    if (settings.customBands) {
+  const handleLoadSettings = useCallback(async (settings) => {
+    console.log('Loading settings:', settings);
+    
+    // First, update UI state
+    if (settings.mode) {
+      console.log('Switching mode to:', settings.mode);
+      setCurrentMode(settings.mode);
+    }
+    if (typeof settings.showSpectrograms === 'boolean') {
+      setShowSpectrograms(settings.showSpectrograms);
+    }
+    
+    if (settings.customBands && Array.isArray(settings.customBands)) {
+      console.log('Loading custom bands:', settings.customBands);
       setCustomBands(settings.customBands);
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(settings.customBands));
       } catch (e) {
         console.error('Error saving loaded bands:', e);
       }
+      
+      // Apply the equalizer settings to the current audio if available
+      if (uploadedAudioFile && inputAudioBuffer) {
+        console.log('Applying loaded settings to audio...', {
+          fileSize: uploadedAudioFile.size,
+          hasInputBuffer: !!inputAudioBuffer,
+          bandsCount: settings.customBands.length
+        });
+        
+        try {
+          setIsProcessingEqualizer(true);
+          
+          const bands = settings.customBands.map(band => ({
+            low: band.low !== undefined ? band.low : 0,
+            high: band.high !== undefined ? band.high : 20000,
+            gain: typeof band.gain === 'number' ? band.gain : 1
+          }));
+          
+          console.log('Calling updateEqualizerGains with bands:', bands);
+          const result = await updateEqualizerGains(
+            uploadedAudioFile,
+            bands
+          );
+          
+          console.log('Equalizer processing complete:', {
+            hasResult: !!result,
+            hasOutputUrl: !!result?.outputAudioUrl,
+            hasFftData: !!result
+          });
+          
+          // Update FFT data first
+          if (result) {
+            setFftData(result);
+            console.log('FFT data updated');
+          }
+          
+          // Download and decode the output audio if URL is provided
+          if (result?.outputAudioUrl) {
+            console.log('Downloading output audio from:', result.outputAudioUrl);
+            const audioResponse = await fetch(result.outputAudioUrl);
+            if (!audioResponse.ok) {
+              throw new Error('Failed to download processed audio');
+            }
+            const audioBlob = await audioResponse.blob();
+            const arrayBuffer = await audioBlob.arrayBuffer();
+            
+            // Decode audio
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const decodedBuffer = await audioContext.decodeAudioData(arrayBuffer);
+            
+            console.log('Output audio decoded:', {
+              duration: decodedBuffer.duration.toFixed(2),
+              sampleRate: decodedBuffer.sampleRate,
+              channels: decodedBuffer.numberOfChannels
+            });
+            
+            setOutputAudioBuffer(decodedBuffer);
+          }
+          
+          console.log('Settings applied successfully');
+        } catch (error) {
+          console.error('Error applying loaded settings:', error);
+          alert(`Failed to apply settings: ${error.message}`);
+        } finally {
+          setIsProcessingEqualizer(false);
+        }
+      } else {
+        console.log('No audio file loaded yet - settings will be applied when audio is uploaded');
+      }
     }
-  }, []);
+  }, [uploadedAudioFile, inputAudioBuffer]);
 
   const handleAudioUpload = useCallback(async (file, audioBuffer) => {
     console.log('Audio uploaded:', file.name);
@@ -366,7 +445,7 @@ function App() {
       {/* Main Content Area */}
       <div className="main-content">
         <ErrorBoundary>
-          {isLoadingAudio ? (
+          {(isLoadingAudio || isProcessingEqualizer) ? (
             <div style={{ 
               display: 'flex', 
               flexDirection: 'column',
@@ -377,9 +456,11 @@ function App() {
               fontSize: '1.5rem',
               color: '#fbbf24'
             }}>
-              <div>⏳ Processing audio...</div>
+              <div>⏳ {isLoadingAudio ? 'Processing audio...' : 'Applying settings...'}</div>
               <div style={{ fontSize: '1rem', color: '#94a3b8' }}>
-                Computing FFT, generating spectrograms, and processing audio...
+                {isLoadingAudio 
+                  ? 'Computing FFT, generating spectrograms, and processing audio...'
+                  : 'Updating equalizer and regenerating audio...'}
               </div>
             </div>
           ) : currentSubMode === 'ai' ? (
